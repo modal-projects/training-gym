@@ -7,26 +7,37 @@ checkpoints Volume), the Ray job runs ``serve_tinker.py`` rather than
 """
 
 import asyncio
+import contextlib
 import shlex
 import socket
+import subprocess
 import threading
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models import Qwen3_30B
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
+from modal_training_gym.common.run_summary import build_run_summary
+from modal_training_gym.common.status import MilesStatus
 from modal_training_gym.frameworks.miles.tinker_gateway import (
     TINKER_HEALTH_PATH,
     TINKER_PORT,
     TINKER_SDK_VERSION,
+    TINKER_TIMING_PATCH_COMMAND,
+    GatewayRunRecord,
     TinkerGateway,
     build_tinker_gateway_app,
     build_tinker_gateway_cmd,
+    create_gateway_training_run,
     forward_port,
     gateway_checkpoint_root,
     gateway_recipe,
+    gateway_training_run_id,
+    mark_gateway_run_failed,
+    mark_gateway_run_stopped,
     require_tinker_gateway,
     wait_for_gateway_ready,
 )
@@ -181,7 +192,377 @@ def _capture_server_kwargs(recipe: MilesRecipe, **launch_kwargs) -> dict:
         )
     image = build_image.return_value.add_local_python_source.return_value
     image.uv_pip_install.assert_called_once_with(f"tinker=={TINKER_SDK_VERSION}")
+    image.uv_pip_install.return_value.run_commands.assert_called_once_with(
+        TINKER_TIMING_PATCH_COMMAND
+    )
     return captured
+
+
+def test_timing_patch_is_applied_after_source_overlays() -> None:
+    # The base64 payload is the patcher itself; it runs after miles_git_ref
+    # checkouts so a source overlay can't drop the instrumentation.
+    assert "base64 -d | python3" in TINKER_TIMING_PATCH_COMMAND
+    assert "forward_backward" in TINKER_TIMING_PATCH_COMMAND
+
+
+def _persist_stub(saved: list[TrainingRun], tokens: dict) -> contextlib.ExitStack:
+    """Stub the metadata Volume: saves append to ``saved``; ``from_id`` returns
+    a copy of the most recent save (what the dashboard would have stored)."""
+
+    def _from_id(run_id: str, **_: object) -> TrainingRun:
+        stored = next(r for r in reversed(saved) if r.training_run_id == run_id)
+        return TrainingRun.model_validate(stored.model_dump(mode="json"))
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(patch("modal_training_gym.cli.setup.ensure_dashboard_deployed"))
+    stack.enter_context(
+        patch(
+            "modal_training_gym.common.config.get_framework_status_url",
+            return_value="https://gym.test/api/framework-status",
+        )
+    )
+    stack.enter_context(
+        patch.object(
+            TrainingRun,
+            "save",
+            autospec=True,
+            side_effect=lambda run: saved.append(run),
+        )
+    )
+    stack.enter_context(
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.vol_put",
+            side_effect=lambda store, key, value: tokens.__setitem__(key, value),
+        )
+    )
+    stack.enter_context(patch.object(TrainingRun, "from_id", side_effect=_from_id))
+    return stack
+
+
+def _create_run(recipe: MilesRecipe | None = None, **kwargs):
+    saved: list[TrainingRun] = []
+    tokens: dict = {}
+    with _persist_stub(saved, tokens):
+        run, record = create_gateway_training_run(
+            recipe or Qwen3_30B_A3B_Tinker_Recipe(),
+            Qwen3_30B(),
+            app_name="demo-tinker",
+            checkpoint_root="/checkpoints/demo-tinker/tinker",
+            checkpoints_volume_name="demo-checkpoints",
+            unauthenticated=False,
+            **kwargs,
+        )
+    return run, record, saved, tokens
+
+
+def test_gateway_run_is_a_running_miles_run_without_dataset() -> None:
+    run, record, saved, tokens = _create_run()
+
+    assert saved == [run]
+    assert run.training_run_id == record.training_run_id
+    assert run.dataset_id == ""
+    assert run.framework.value == "miles"
+    assert run.status is TrainingRunStatus.RUNNING
+    assert run.framework_status is MilesStatus.INITIALIZING
+    assert run.config["dataset"] == {}
+    assert run.config["entrypoint"] == "serve_tinker.py"
+    assert run.config["model"]["model_name"] == "Qwen/Qwen3-30B-A3B"
+    assert run.config["recipe"]["multi_lora_n_adapters"] == 4
+    assert run.app_name == "demo-tinker"
+    assert run.metadata is not None
+    assert run.metadata["run_type"] == "tinker_gateway"
+    assert run.metadata["n_slots"] == 4
+    assert run.metadata["base_model"] == "Qwen/Qwen3-30B-A3B"
+    assert run.metadata["checkpoint_root"] == "/checkpoints/demo-tinker/tinker"
+    assert run.source_model is not None
+    assert run.source_model.model_name == "Qwen/Qwen3-30B-A3B"
+    assert run.metadata["checkpoints_volume_name"] == "demo-checkpoints"
+    assert run.metadata["unauthenticated"] is False
+    assert run.metadata["gateway_url"] == ""
+
+
+def test_gateway_run_token_is_stored_for_the_dashboard() -> None:
+    _run, record, _saved, tokens = _create_run()
+
+    assert record.framework_status_url == "https://gym.test/api/framework-status"
+    assert len(record.framework_status_token) >= 32
+    assert tokens == {record.training_run_id: {"token": record.framework_status_token}}
+
+
+def test_gateway_run_ids_are_unique_per_launch() -> None:
+    recipe, model = Qwen3_30B_A3B_Tinker_Recipe(), Qwen3_30B()
+    a = gateway_training_run_id(recipe, model, app_name="demo-tinker")
+    b = gateway_training_run_id(recipe, model, app_name="demo-tinker")
+    assert a != b
+
+
+def test_gateway_run_summary_is_ready_with_empty_dataset() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.modal_app_id = "ap-123"
+    run.metadata = {**(run.metadata or {}), "gateway_url": "https://gw.modal.run"}
+    run.framework_status = MilesStatus.SERVING
+    run.metadata["framework_progress"] = {"phase": "serving", "is_active": True}
+
+    summary = build_run_summary(run.model_dump(mode="json"))
+
+    assert summary.status == "running"
+    assert summary.display_status == "ready"
+    assert summary.display_stage == "Serving Tinker API"
+    assert summary.dataset == ""
+    assert summary.recipe == "miles-tinker"
+    assert summary.model == "Qwen/Qwen3-30B-A3B"
+
+
+def test_gateway_run_summary_is_pending_until_serving() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.modal_app_id = "ap-123"
+    for status in (MilesStatus.DOWNLOAD_MODEL, MilesStatus.INITIALIZING):
+        run.framework_status = status
+        summary = build_run_summary(run.model_dump(mode="json"))
+        assert summary.display_status == "pending"
+        assert summary.recipe == "miles-tinker"
+
+
+def test_stopped_gateway_run_summary_is_stopped() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.status = TrainingRunStatus.STOPPED
+    summary = build_run_summary(run.model_dump(mode="json"))
+    assert summary.display_status == "stopped"
+
+
+def test_ordinary_run_summary_is_not_marked_ready() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.metadata = {}
+    summary = build_run_summary(run.model_dump(mode="json"))
+    assert summary.display_status == "pending"
+    assert summary.recipe == "miles"
+
+
+def test_mark_gateway_run_stopped_terminalizes_running_run_once() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.started_at = int(run.started_at) - 120
+    saved: list[TrainingRun] = []
+    with (
+        patch.object(TrainingRun, "from_id", return_value=run),
+        patch.object(
+            TrainingRun, "save", autospec=True, side_effect=lambda r: saved.append(r)
+        ),
+    ):
+        mark_gateway_run_stopped(run.training_run_id)
+        mark_gateway_run_stopped(run.training_run_id)
+
+    assert len(saved) == 1
+    assert run.status is TrainingRunStatus.STOPPED
+    assert run.ended_at == run.completed_at
+    assert run.duration_seconds is not None and run.duration_seconds >= 120
+
+
+def test_mark_gateway_run_stopped_leaves_failed_run_alone() -> None:
+    run, _record, _saved, _tokens = _create_run()
+    run.status = TrainingRunStatus.FAILED
+    with (
+        patch.object(TrainingRun, "from_id", return_value=run),
+        patch.object(TrainingRun, "save", autospec=True) as save,
+    ):
+        mark_gateway_run_stopped(run.training_run_id)
+    save.assert_not_called()
+    assert run.status is TrainingRunStatus.FAILED
+
+
+def test_launch_records_run_then_binds_app_id_and_url() -> None:
+    saved: list[TrainingRun] = []
+    tokens: dict = {}
+
+    class FakeApp:
+        app_id = "ap-gateway"
+
+        def deploy(self, *, environment_name=None):
+            pass
+
+        TinkerGatewayServer = MagicMock(
+            **{"get_url.return_value": "https://gw.modal.run/"}
+        )
+
+    with (
+        _persist_stub(saved, tokens),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            return_value=FakeApp(),
+        ) as build_app,
+    ):
+        gw = TinkerGateway.launch(Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B())
+
+    record = build_app.call_args.kwargs["run_record"]
+    assert isinstance(record, GatewayRunRecord)
+    assert record.training_run_id == gw.training_run_id
+    assert record.framework_status_token == tokens[gw.training_run_id]["token"]
+
+    # Saved once before deploy (so the containers can post status) and once
+    # after, with the Modal app + URL bound.
+    assert [r.training_run_id for r in saved] == [gw.training_run_id] * 2
+    final = saved[-1]
+    assert final.modal_app_id == "ap-gateway"
+    assert final.modal_app_url == gw.modal_app_url
+    assert final.metadata is not None
+    assert final.metadata["gateway_url"] == "https://gw.modal.run"
+    assert final.status is TrainingRunStatus.RUNNING
+    assert gw.url == "https://gw.modal.run"
+
+
+def test_launch_binds_app_without_reverting_container_status_updates() -> None:
+    saved: list[TrainingRun] = []
+    tokens: dict = {}
+
+    class FakeApp:
+        app_id = "ap-gateway"
+        TinkerGatewayServer = MagicMock(
+            **{"get_url.return_value": "https://gw.modal.run"}
+        )
+
+        def deploy(self, *, environment_name=None):
+            # The head container posts ``serving`` before deploy() returns.
+            stored = TrainingRun.model_validate(saved[-1].model_dump(mode="json"))
+            stored.framework_status = MilesStatus.SERVING
+            saved.append(stored)
+
+    with (
+        _persist_stub(saved, tokens),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            return_value=FakeApp(),
+        ),
+    ):
+        TinkerGateway.launch(Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B())
+
+    final = saved[-1]
+    assert final.modal_app_id == "ap-gateway"
+    assert final.framework_status is MilesStatus.SERVING
+
+
+def test_launch_stops_live_app_and_fails_run_when_finalization_raises() -> None:
+    saved: list[TrainingRun] = []
+    tokens: dict = {}
+
+    class FakeApp:
+        app_id = "ap-gateway"
+        TinkerGatewayServer = MagicMock(**{"get_url.return_value": ""})
+
+        def deploy(self, *, environment_name=None):
+            pass
+
+    with (
+        _persist_stub(saved, tokens),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            return_value=FakeApp(),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run_cmd,
+        pytest.raises(RuntimeError, match="no web URL"),
+    ):
+        TinkerGateway.launch(
+            Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B(), environment_name="dev"
+        )
+
+    run_cmd.assert_called_once_with(
+        ["modal", "app", "stop", "-y", "--env", "dev", "ap-gateway"], check=False
+    )
+    assert saved[-1].status is TrainingRunStatus.FAILED
+    assert saved[-1].error_message is not None
+    assert "no web URL" in saved[-1].error_message
+
+
+def test_mark_gateway_run_failed_records_ray_error() -> None:
+    run, _record, saved, _tokens = _create_run()
+    with _persist_stub(saved, {}):
+        mark_gateway_run_failed(run.training_run_id, "Ray job status FAILED")
+        mark_gateway_run_failed(run.training_run_id, "again")
+    assert saved[-1].status is TrainingRunStatus.FAILED
+    assert saved[-1].error_message == "Ray job status FAILED"
+    assert sum(r.status is TrainingRunStatus.FAILED for r in saved) == 1
+
+
+def test_launch_marks_run_failed_when_app_build_raises() -> None:
+    saved: list[TrainingRun] = []
+    with (
+        _persist_stub(saved, {}),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            side_effect=ValueError("bad overlay"),
+        ),
+        pytest.raises(ValueError, match="bad overlay"),
+    ):
+        TinkerGateway.launch(Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B())
+
+    assert saved[-1].status is TrainingRunStatus.FAILED
+    assert saved[-1].error_message == "ValueError: bad overlay"
+
+
+def test_create_run_marks_run_failed_when_token_write_raises() -> None:
+    saved: list[TrainingRun] = []
+    with (
+        _persist_stub(saved, {}),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.vol_put",
+            side_effect=OSError("volume unavailable"),
+        ),
+        pytest.raises(OSError, match="volume unavailable"),
+    ):
+        create_gateway_training_run(
+            Qwen3_30B_A3B_Tinker_Recipe(),
+            Qwen3_30B(),
+            app_name="demo-tinker",
+            checkpoint_root="/checkpoints/demo-tinker/tinker",
+            checkpoints_volume_name="demo-checkpoints",
+            unauthenticated=False,
+        )
+
+    assert saved[0].status is TrainingRunStatus.RUNNING
+    assert saved[-1].status is TrainingRunStatus.FAILED
+
+
+def test_launch_marks_run_failed_when_deploy_raises() -> None:
+    saved: list[TrainingRun] = []
+    tokens: dict = {}
+
+    class FakeApp:
+        def deploy(self, *, environment_name=None):
+            raise RuntimeError("no capacity")
+
+    with (
+        _persist_stub(saved, tokens),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.resolve_checkpoint_volumes",
+            return_value=("demo-checkpoints", "/checkpoints", object()),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.build_tinker_gateway_app",
+            return_value=FakeApp(),
+        ),
+        pytest.raises(RuntimeError, match="no capacity"),
+    ):
+        TinkerGateway.launch(Qwen3_30B_A3B_Tinker_Recipe(), model=Qwen3_30B())
+
+    assert saved[-1].status is TrainingRunStatus.FAILED
+    assert saved[-1].error_message == "RuntimeError: no capacity"
+    assert saved[-1].ended_at is not None
 
 
 def test_gateway_app_is_authenticated_server_on_tinker_port() -> None:
@@ -300,3 +681,128 @@ def test_handle_exposes_health_url_and_sdk_pin() -> None:
     assert gw.health_url == f"https://demo--tinker.modal.run{TINKER_HEALTH_PATH}"
     assert gw.unauthenticated is False
     assert TINKER_SDK_VERSION == "0.26.2"
+
+
+def test_handle_stop_stops_app_then_marks_run_stopped() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        modal_app_id="ap-123",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run,
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped"
+        ) as mark_stopped,
+    ):
+        gw.stop()
+
+    run.assert_called_once_with(["modal", "app", "stop", "-y", "ap-123"], check=True)
+    mark_stopped.assert_called_once_with("run-1")
+
+
+def test_handle_stop_leaves_run_alone_when_app_stop_fails() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "modal"),
+        ),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped"
+        ) as mark_stopped,
+        pytest.raises(subprocess.CalledProcessError),
+    ):
+        gw.stop()
+    mark_stopped.assert_not_called()
+
+
+def test_handle_stop_retries_marking_run_after_app_is_stopped() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run,
+        patch("modal_training_gym.frameworks.miles.tinker_gateway.time.sleep"),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped",
+            side_effect=[OSError("volume unavailable"), None],
+        ) as mark_stopped,
+    ):
+        gw.stop()
+    run.assert_called_once()
+    assert mark_stopped.call_count == 2
+
+
+def test_handle_stop_raises_with_recovery_hint_when_marking_keeps_failing() -> None:
+    gw = TinkerGateway(
+        app_name="demo-tinker",
+        model=Qwen3_30B(),
+        recipe=_gateway(),
+        base_model="Qwen/Qwen3-30B-A3B",
+        n_slots=2,
+        checkpoint_root="/checkpoints/demo-tinker/tinker",
+        checkpoints_volume_name="demo-checkpoints",
+        url="https://demo--tinker.modal.run",
+        training_run_id="run-1",
+    )
+    with (
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.subprocess.run"
+        ) as run,
+        patch("modal_training_gym.frameworks.miles.tinker_gateway.time.sleep"),
+        patch(
+            "modal_training_gym.frameworks.miles.tinker_gateway.mark_gateway_run_stopped",
+            side_effect=OSError("volume unavailable"),
+        ) as mark_stopped,
+        pytest.raises(RuntimeError, match="mark_gateway_run_stopped\\('run-1'\\)"),
+    ):
+        gw.stop()
+    run.assert_called_once()
+    assert mark_stopped.call_count == 3
+
+
+def test_externally_stopped_gateway_app_is_reconciled() -> None:
+    from modal_training_gym.common.run_reconciler import reconcile_decision
+
+    run, _record, _saved, _tokens = _create_run()
+    run.modal_app_id = "ap-123"
+    run.framework_status = MilesStatus.SERVING
+    now = int(run.started_at) + 3600
+    run.updated_at = now - 60
+
+    live = reconcile_decision(run, now=now, has_train_result=False, app_live=True)
+    assert live.should_terminalize is False
+
+    dead = reconcile_decision(run, now=now, has_train_result=False, app_live=False)
+    assert dead.should_terminalize is True
+    assert dead.reason == "stale_modal_app_terminated"
