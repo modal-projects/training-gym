@@ -182,17 +182,9 @@ _EXPORTS = {
         "Qwen3_30B_VllmRecipe",
     ),
     "Qwen3_6_35B": ("modal_training_gym.common.models", "Qwen3_6_35B"),
-    "Qwen3_6_35B_Long_Context": (
-        "modal_training_gym.common.models",
-        "Qwen3_6_35B_Long_Context",
-    ),
     "Qwen3_6_35B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_35B_Recipe",
-    ),
-    "Qwen3_6_35B_Recipe_Long_Context": (
-        "modal_training_gym.train_recipes.slime_recipe",
-        "Qwen3_6_35B_Recipe_Long_Context",
     ),
     "Qwen3_6_35B_SglangRecipe": (
         "modal_training_gym.deploy_recipes.sglang_recipe",
@@ -319,9 +311,7 @@ __all__ = [
     "Qwen3_30B_SglangRecipe",
     "Qwen3_30B_VllmRecipe",
     "Qwen3_6_35B",
-    "Qwen3_6_35B_Long_Context",
     "Qwen3_6_35B_Recipe",
-    "Qwen3_6_35B_Recipe_Long_Context",
     "Qwen3_6_35B_SglangRecipe",
     "Qwen3_6_35B_VllmRecipe",
     "Qwen3_6_27B",

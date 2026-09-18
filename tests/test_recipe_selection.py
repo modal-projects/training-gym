@@ -25,9 +25,6 @@ from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
 from modal_training_gym.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_6_35b_long_context import (
-    Qwen3_6_35B_Recipe_Long_Context,
-)
 
 _RECIPE_PACKAGES = (
     "modal_training_gym.train_recipes.slime_recipe",
@@ -200,17 +197,6 @@ def test_model_recipe_uses_its_class_defaults() -> None:
 
     assert recipe.actor_num_gpus_per_node == 1
     assert recipe.max_tokens_per_gpu == 8192
-
-
-def test_qwen3_6_35b_long_context_uses_disagg_two_nodes() -> None:
-    recipe = Qwen3_6_35B_Recipe_Long_Context()
-
-    assert recipe.colocate is False
-    assert recipe.gpu_allocation.actor_gpus == 1
-    assert recipe.gpu_allocation.rollout_gpus == 1
-    assert recipe.gpu_allocation.total_gpus == 2
-    assert recipe.gpu_allocation.gpus_per_node == 2
-    assert recipe.gpu_allocation.total_nodes == 1
 
 
 def test_prepare_recipe_does_not_mutate_stored_launch_callables() -> None:
