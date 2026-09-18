@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+from collections.abc import Mapping
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -44,16 +45,28 @@ _STAGE_LABELS = {
     "offload_train": "Offload train",
     "checkpoint_save": "Saving checkpoint",
     "training": "Training",
+    "serving": "Serving Tinker API",
 }
 _QUEUEABLE_STAGES = {"download_model", "convert_model"}
 
+TINKER_GATEWAY_RUN_TYPE = "tinker_gateway"
 
-def _display_status(status: str, *, has_train_result: bool) -> str:
+
+def is_gateway_run(metadata: Mapping[str, object] | None) -> bool:
+    return bool(metadata) and metadata.get("run_type") == TINKER_GATEWAY_RUN_TYPE
+
+
+def _display_status(
+    status: str, *, has_train_result: bool, gateway: bool = False
+) -> str:
     normalized = status.strip().lower()
     if has_train_result or normalized == "completed":
         return "completed"
     if normalized in {"cancelled", "stopped", "failed"}:
         return normalized
+    if gateway:
+        # A gateway never "completes"; while its app is up it is ready to serve.
+        return "ready"
     return "pending"
 
 
@@ -644,6 +657,7 @@ def build_run_summary(
     framework = _text(run.get("framework")) or "(untagged)"
     framework_status = _text(run.get("framework_status"))
     framework_progress = _framework_progress(metadata)
+    gateway = is_gateway_run(metadata)
     return RunSummary(
         training_run_id=training_run_id,
         run_id=training_run_id,
@@ -651,6 +665,7 @@ def build_run_summary(
         display_status=_display_status(
             status,
             has_train_result=result_summary is not None,
+            gateway=gateway,
         ),
         display_stage=_display_stage(framework_status, framework_progress),
         framework=framework,
@@ -659,7 +674,7 @@ def build_run_summary(
         latest_rollout=_latest_rollout(metadata),
         model=model,
         dataset=config_dataset,
-        recipe=framework,
+        recipe=f"{framework}-tinker" if gateway else framework,
         group_id=group_id,
         group_tags=_group_tags(metadata, group_id),
         modal_app_id=modal_app_id,

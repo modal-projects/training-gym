@@ -36,6 +36,8 @@ class MilesStatus(str, Enum):
     OFFLOAD_TRAIN = "offload_train"
     CHECKPOINT_SAVE = "checkpoint_save"
     TRAINING = "training"
+    # Long-lived Tinker gateway (``serve_tinker.py``) answering requests.
+    SERVING = "serving"
 
 
 FrameworkStatus: TypeAlias = SlimeStatus | MilesStatus

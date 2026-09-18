@@ -19,12 +19,19 @@ This module hosts that server as an authenticated Modal ``@app.server``:
   whichever container Modal routes a request to answers it;
 - adapter state and sampler snapshots live under ``tinker_checkpoint_root``
   on the checkpoints Volume, so they survive gateway restarts.
+
+Each launch is recorded in the Training Gym dashboard as a ``TrainingRun`` with
+no dataset (``metadata.run_type == "tinker_gateway"``): it stays ``RUNNING`` /
+``serving`` while the app is up, turns ``STOPPED`` when the head container
+exits, and collects one ``forward_backward`` timing interval per batch the
+trainer executes (see ``patches/patch_tinker_timing.py``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import secrets as _secrets
 import socket
 import subprocess
 import threading
@@ -33,7 +40,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
@@ -41,16 +48,27 @@ from pydantic import BaseModel, ConfigDict
 from modal_training_gym.common import hf_secrets
 from modal_training_gym.common.checkpoint import require_within_volume_mount
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.framework import Framework
+from modal_training_gym.common.ids import create_hash
 from modal_training_gym.common.launcher_helpers import resolve_checkpoint_volumes
 from modal_training_gym.common.launcher_utils import resolve_checkpoint_ref
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.patches import encode_patch
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
+from modal_training_gym.common.run_summary import TINKER_GATEWAY_RUN_TYPE
+from modal_training_gym.common.status import MilesStatus
+from modal_training_gym.common.status_reporter import (
+    enqueue_framework_status,
+    flush as flush_status_reporter,
+)
 from modal_training_gym.frameworks.miles.modal_helpers.utils import build_train_cmd
 from modal_training_gym.train_recipes.miles_recipe.recipe import (
     CHECKPOINTS_PATH,
     HF_CACHE_PATH,
     MilesRecipe,
 )
+from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 if TYPE_CHECKING:
     import tinker
@@ -63,6 +81,15 @@ TINKER_SERVER_CLASS = "TinkerGatewayServer"
 
 _DEFAULT_STARTUP_TIMEOUT = 60 * 60
 _CHECKPOINT_COMMIT_INTERVAL_S = 60.0
+
+_PATCH_TINKER_TIMING_B64 = encode_patch(
+    "patch_tinker_timing", Path(__file__).parent / "modal_helpers" / "patches"
+)
+TINKER_TIMING_PATCH_COMMAND = (
+    f"echo {_PATCH_TINKER_TIMING_B64} | base64 -d | python3"
+    " || echo 'WARNING: gateway timing patch did not apply; forward_backward"
+    " timings will be missing from the dashboard'"
+)
 
 
 def require_tinker_gateway(miles: MilesRecipe) -> None:
@@ -165,8 +192,147 @@ def gateway_port(miles: MilesRecipe) -> int:
 
 
 def tinker_gateway_image(image: Any) -> Any:
-    """Add the client SDK the gateway imports (``tinker.types``) at runtime."""
-    return image.uv_pip_install(f"tinker=={TINKER_SDK_VERSION}")
+    """Add the client SDK the gateway imports (``tinker.types``) at runtime and
+    the ``forward_backward`` timing patch, after every source overlay."""
+    return image.uv_pip_install(f"tinker=={TINKER_SDK_VERSION}").run_commands(
+        TINKER_TIMING_PATCH_COMMAND
+    )
+
+
+@dataclass(frozen=True)
+class GatewayRunRecord:
+    """Dashboard identity of one gateway launch, shared with its containers."""
+
+    training_run_id: str
+    framework_status_url: str = ""
+    framework_status_token: str = ""
+
+
+def gateway_training_run_id(
+    recipe: MilesRecipe, model: ModelConfig, *, app_name: str
+) -> str:
+    return create_hash(
+        model.model_name,
+        "",
+        f"{type(recipe).__name__}:{Framework.MILES.value}-tinker",
+        app_name,
+        model.model_path or "",
+    )
+
+
+def gateway_run_config(
+    recipe: MilesRecipe, model: ModelConfig, *, app_name: str
+) -> dict[str, Any]:
+    """``TrainingRun.config`` for a gateway: model + recipe, no dataset."""
+    return {
+        "app_name": app_name,
+        "framework": Framework.MILES.value,
+        "entrypoint": TINKER_SERVE_SCRIPT,
+        "model": {
+            "model_name": model.model_name,
+            "model_path": model.model_path,
+            "miles_model_name": recipe.miles_model_name,
+        },
+        "recipe": {
+            "type": type(recipe).__name__,
+            "name": recipe.name,
+            "multi_lora_n_adapters": recipe.multi_lora_n_adapters,
+            "lora_rank": recipe.lora_rank,
+            "lora_alpha": recipe.lora_alpha,
+            "gpu_type": recipe.gpu_type,
+            "total_nodes": recipe.total_nodes,
+            "gpus_per_node": recipe.gpu_allocation.gpus_per_node,
+        },
+        "dataset": {},
+    }
+
+
+def gateway_run_metadata(
+    recipe: MilesRecipe,
+    model: ModelConfig,
+    *,
+    checkpoint_root: str,
+    checkpoints_volume_name: str,
+    unauthenticated: bool,
+    url: str = "",
+) -> dict[str, Any]:
+    return {
+        "run_type": TINKER_GATEWAY_RUN_TYPE,
+        "gateway_url": url,
+        "base_model": recipe.tinker_base_model or model.model_name,
+        "n_slots": recipe.multi_lora_n_adapters or 0,
+        "tinker_sdk_version": TINKER_SDK_VERSION,
+        "checkpoint_root": checkpoint_root,
+        "checkpoints_volume_name": checkpoints_volume_name,
+        "unauthenticated": unauthenticated,
+    }
+
+
+def create_gateway_training_run(
+    recipe: MilesRecipe,
+    model: ModelConfig,
+    *,
+    app_name: str,
+    checkpoint_root: str,
+    checkpoints_volume_name: str,
+    unauthenticated: bool,
+) -> tuple[TrainingRun, GatewayRunRecord]:
+    """Persist the dashboard record for a gateway launch before deploying it.
+
+    The run exists before the containers post status or timing events, which
+    the dashboard rejects for unknown runs.
+    """
+    from modal_training_gym.cli.setup import ensure_dashboard_deployed
+    from modal_training_gym.common.config import get_framework_status_url
+
+    training_run_id = gateway_training_run_id(recipe, model, app_name=app_name)
+    ensure_dashboard_deployed()
+    framework_status_url = get_framework_status_url() or ""
+    framework_status_token = _secrets.token_urlsafe(32)
+
+    created_at = int(time.time())
+    run = TrainingRun(
+        training_run_id=training_run_id,
+        framework=Framework.MILES,
+        config=gateway_run_config(recipe, model, app_name=app_name),
+        dataset_id="",
+        framework_status=MilesStatus.INITIALIZING,
+        created_at=created_at,
+        started_at=created_at,
+        app_name=app_name,
+        metadata=gateway_run_metadata(
+            recipe,
+            model,
+            checkpoint_root=checkpoint_root,
+            checkpoints_volume_name=checkpoints_volume_name,
+            unauthenticated=unauthenticated,
+        ),
+    )
+    run.save()
+    vol_put(
+        MetadataStore.FRAMEWORK_STATUS_TOKENS,
+        training_run_id,
+        {"token": framework_status_token},
+    )
+    print(f"TrainingRun recorded: {training_run_id}")
+    return run, GatewayRunRecord(
+        training_run_id=training_run_id,
+        framework_status_url=framework_status_url,
+        framework_status_token=framework_status_token,
+    )
+
+
+def mark_gateway_run_stopped(training_run_id: str) -> None:
+    """Terminal ``STOPPED`` for the gateway's run once its head container exits."""
+    run = TrainingRun.from_id(training_run_id)
+    if run.status is not TrainingRunStatus.RUNNING:
+        return
+    ended_at = int(time.time())
+    run.status = TrainingRunStatus.STOPPED
+    run.ended_at = ended_at
+    run.completed_at = ended_at
+    run.duration_seconds = max(0, ended_at - run.started_at)
+    run.save()
 
 
 def wait_for_gateway_ready(
@@ -254,12 +420,15 @@ def build_tinker_gateway_app(
     app_name: str,
     unauthenticated: bool = False,
     startup_timeout: int = _DEFAULT_STARTUP_TIMEOUT,
+    run_record: GatewayRunRecord | None = None,
 ) -> Any:
     """Build the Modal app that serves ``serve_tinker.py`` behind ``@app.server``.
 
     The returned app exposes the ``_Server`` handle as
     ``app.TinkerGatewayServer`` (mirroring ``build_sglang_serve_app``) so the
-    launcher can resolve its URL after ``deploy()``.
+    launcher can resolve its URL after ``deploy()``. With ``run_record`` the
+    head container reports ``serving`` and ``forward_backward`` timings for
+    that run and marks it stopped on exit.
     """
     import modal
     from modal import App, Volume
@@ -278,6 +447,8 @@ def build_tinker_gateway_app(
     checkpoints_volume = storage.volume
     checkpoints_volume_name = storage.volume_name
     checkpoint_root = storage.checkpoint_root
+    run_record = run_record or GatewayRunRecord(training_run_id="")
+    training_run_id = run_record.training_run_id
     volumes: dict[str | PurePosixPath, Any] = {
         str(HF_CACHE_PATH): hf_cache_volume,
         storage.mount_path: checkpoints_volume,
@@ -349,6 +520,17 @@ def build_tinker_gateway_app(
                 )
                 return
 
+            def _report(status: MilesStatus) -> None:
+                if training_run_id:
+                    enqueue_framework_status(
+                        training_run_id,
+                        status.value,
+                        url=run_record.framework_status_url or None,
+                        token=run_record.framework_status_token or None,
+                        is_active=True,
+                    )
+
+            _report(MilesStatus.DOWNLOAD_MODEL)
             print(f"[tinker-gateway] downloading {model.model_name}")
             model.download()
             miles.download_model()
@@ -356,6 +538,7 @@ def build_tinker_gateway_app(
             hf_cache_volume.commit()
             os.makedirs(checkpoint_root, exist_ok=True)
 
+            _report(MilesStatus.INITIALIZING)
             cluster.start_ray()
 
             served = gateway_recipe(
@@ -366,11 +549,16 @@ def build_tinker_gateway_app(
                 head_addr=cluster.head_addr,
                 metric_env={},
                 environment=served.environment,
-                substep_timing="off",
+                substep_timing="auto" if training_run_id else "off",
                 extra_env={
+                    "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
                     "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
+                    "TRAINING_GYM_FRAMEWORK_STATUS_URL": (
+                        run_record.framework_status_url
+                    ),
                 },
+                framework_status_token=run_record.framework_status_token,
             )
             print(
                 f"[tinker-gateway] {app_name}: {n_nodes} node(s) x {gpu_spec}, "
@@ -414,6 +602,7 @@ def build_tinker_gateway_app(
             threading.Thread(
                 target=_commit_loop, daemon=True, name="tinker-gateway-commit"
             ).start()
+            _report(MilesStatus.SERVING)
             print(
                 f"[tinker-gateway] serving {served.tinker_base_model} on :{port} "
                 f"(tinker=={TINKER_SDK_VERSION})"
@@ -434,6 +623,12 @@ def build_tinker_gateway_app(
                     checkpoints_volume.commit()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[tinker-gateway] final checkpoint commit failed: {exc!r}")
+            if self.cluster.is_head and training_run_id:
+                try:
+                    mark_gateway_run_stopped(training_run_id)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[tinker-gateway] could not mark run stopped: {exc!r}")
+                flush_status_reporter()
             subprocess.run(["ray", "stop", "--force"], check=False)
 
     setattr(app, TINKER_SERVER_CLASS, TinkerGatewayServer)
@@ -455,6 +650,7 @@ class TinkerGateway(BaseModel):
         modal_app_id: Modal app ID.
         modal_app_url: Dashboard URL.
         url: Gateway base URL (the Tinker SDK's ``base_url``).
+        training_run_id: Training Gym dashboard run recording this launch.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -470,10 +666,18 @@ class TinkerGateway(BaseModel):
     modal_app_id: str = ""
     modal_app_url: str = ""
     url: str
+    training_run_id: str = ""
 
     @property
     def health_url(self) -> str:
         return f"{self.url.rstrip('/')}{TINKER_HEALTH_PATH}"
+
+    @property
+    def training_run(self) -> TrainingRun | None:
+        """The dashboard ``TrainingRun`` for this gateway, if one was recorded."""
+        if not self.training_run_id:
+            return None
+        return TrainingRun.from_id(self.training_run_id)
 
     def service_client(self, tenant: str, **kwargs: object) -> "tinker.ServiceClient":
         """``tinker.ServiceClient`` for ``tenant`` with proxy auth attached.
@@ -546,14 +750,29 @@ class TinkerGateway(BaseModel):
         slug = model.model_name.rstrip("/").split("/")[-1].replace("_", "-").lower()
         app_name = app_name or f"{recipe.name or slug}-tinker"
 
+        storage = resolve_gateway_storage(recipe, app_name=app_name)
+        run, run_record = create_gateway_training_run(
+            recipe,
+            model,
+            app_name=app_name,
+            checkpoint_root=storage.checkpoint_root,
+            checkpoints_volume_name=storage.volume_name,
+            unauthenticated=unauthenticated,
+        )
+
         app = build_tinker_gateway_app(
             miles=recipe,
             model=model,
             app_name=app_name,
             unauthenticated=unauthenticated,
             startup_timeout=startup_timeout,
+            run_record=run_record,
         )
-        app.deploy(environment_name=environment_name)
+        try:
+            app.deploy(environment_name=environment_name)
+        except BaseException as exc:
+            _mark_gateway_run_failed(run, exc)
+            raise
 
         server = getattr(app, TINKER_SERVER_CLASS)
         url = _resolve(server.get_url())
@@ -564,8 +783,12 @@ class TinkerGateway(BaseModel):
             raise RuntimeError(
                 f"Deployed {app_name!r} but no Modal app id was returned."
             )
+        url = url.rstrip("/")
 
-        storage = resolve_gateway_storage(recipe, app_name=app_name)
+        run.modal_app_id = modal_app_id
+        run.modal_app_url = modal_app_dashboard_url(modal_app_id)
+        run.metadata = {**(run.metadata or {}), "gateway_url": url}
+        run.save()
         return cls(
             app_name=app_name,
             model=model,
@@ -577,7 +800,8 @@ class TinkerGateway(BaseModel):
             unauthenticated=unauthenticated,
             modal_app_id=modal_app_id,
             modal_app_url=modal_app_dashboard_url(modal_app_id),
-            url=url.rstrip("/"),
+            url=url,
+            training_run_id=run.training_run_id,
         )
 
     def wait_until_ready(self, timeout: int = _DEFAULT_STARTUP_TIMEOUT) -> None:
@@ -627,13 +851,35 @@ def _resolve(value: Any) -> Any:
     return _run_coro(value)
 
 
+def _mark_gateway_run_failed(run: TrainingRun, exc: BaseException) -> None:
+    ended_at = int(time.time())
+    run.status = (
+        TrainingRunStatus.STOPPED
+        if isinstance(exc, KeyboardInterrupt)
+        else TrainingRunStatus.FAILED
+    )
+    run.error_message = f"{type(exc).__name__}: {exc}"
+    run.ended_at = ended_at
+    run.completed_at = ended_at
+    run.duration_seconds = max(0, ended_at - run.started_at)
+    try:
+        run.save()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 __all__ = [
     "TINKER_HEALTH_PATH",
     "TINKER_PORT",
     "TINKER_SDK_VERSION",
+    "GatewayRunRecord",
     "TinkerGateway",
     "build_tinker_gateway_app",
     "build_tinker_gateway_cmd",
+    "create_gateway_training_run",
     "gateway_checkpoint_root",
     "gateway_recipe",
+    "gateway_run_config",
+    "gateway_run_metadata",
+    "mark_gateway_run_stopped",
 ]
