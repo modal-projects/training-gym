@@ -87,19 +87,6 @@ def bootstrap() -> None:
 # ── Client-side buffer ─────
 
 
-def _as_finite_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if not isinstance(value, (int, float)):
-        try:
-            value = value.item()  # 0-d tensors and numpy scalars
-        except Exception:
-            return None
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return None
-    return float(value) if math.isfinite(value) else None
-
-
 def flatten_numeric(data: Mapping[str, Any], prefix: str = "") -> dict[str, float]:
     """``{"train": {"loss": 0.4}}`` -> ``{"train/loss": 0.4}``, dropping what
     W&B would not chart (bools, strings, media, NaN/inf)."""
@@ -108,8 +95,18 @@ def flatten_numeric(data: Mapping[str, Any], prefix: str = "") -> dict[str, floa
         key = f"{prefix}/{raw_key}" if prefix else str(raw_key)
         if isinstance(value, Mapping):
             out.update(flatten_numeric(value, key))
-        elif (number := _as_finite_float(value)) is not None:
-            out[key] = number
+            continue
+        if not isinstance(value, (int, float)):
+            try:
+                value = value.item()  # 0-d tensors and numpy scalars
+            except Exception:
+                continue
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            out[key] = float(value)
     return out
 
 
@@ -179,29 +176,22 @@ _MIRROR: MetricMirror | None = None
 _MIRROR_LOCK = threading.Lock()
 
 
-def _mirror() -> MetricMirror | None:
-    """The process-wide mirror, or None outside a Training Gym run."""
-    global _MIRROR
-    with _MIRROR_LOCK:
-        if _MIRROR is None:
-            training_run_id = os.environ.get("TRAINING_GYM_TRAINING_RUN_ID")
-            if not training_run_id:
-                return None
-            from modal_training_gym.common.reporting import register_pre_drain_hook
-
-            mirror = _MIRROR = MetricMirror(training_run_id)
-            register_pre_drain_hook(lambda: mirror.flush(final=True))
-        return _MIRROR
-
-
 def mirror_log(
     data: Any, *, step: int | None = None, commit: bool | None = None
 ) -> None:
     """Best-effort mirror of one ``wandb.log`` call; never raises."""
+    global _MIRROR
     try:
-        mirror = _mirror()
-        if mirror is not None and isinstance(data, Mapping):
-            mirror.log(data, step=step, commit=commit)
+        with _MIRROR_LOCK:
+            if _MIRROR is None:
+                if not (run_id := os.environ.get("TRAINING_GYM_TRAINING_RUN_ID")):
+                    return
+                from modal_training_gym.common.reporting import register_pre_drain_hook
+
+                mirror = _MIRROR = MetricMirror(run_id)
+                register_pre_drain_hook(lambda: mirror.flush(final=True))
+        if isinstance(data, Mapping):
+            _MIRROR.log(data, step=step, commit=commit)
     except Exception:
         pass
 
@@ -247,14 +237,9 @@ def patch_wandb_module() -> None:
     original_log = run_cls.log
 
     def log(
-        self: Any,
-        data: Any,
-        step: int | None = None,
-        commit: bool | None = None,
-        *args: Any,
-        **kwargs: Any,
+        self: Any, data: Any, step: Any = None, commit: Any = None, *a: Any, **k: Any
     ) -> Any:
-        result = original_log(self, data, step, commit, *args, **kwargs)
+        result = original_log(self, data, step, commit, *a, **k)
         mirror_log(data, step=step, commit=commit)
         return result
 
@@ -280,42 +265,33 @@ class _Config(dict):
         except KeyError as exc:
             raise AttributeError(name) from exc
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        self[name] = value
+    __setattr__ = dict.__setitem__
+
+
+class _Media:
+    """Stand-in for ``wandb.Image``/``Table``/``Settings``; dropped by the flattener."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
 
 class DashboardRun:
     """What the shim's ``wandb.init`` returns."""
 
     def __init__(self, run_id: str, name: str, project: str, config: Any) -> None:
-        self.id = run_id
-        self.name = name
-        self.project = project
-        self.url = ""
+        self.id, self.name, self.project, self.url = run_id, name, project, ""
         self.summary: dict[str, Any] = {}
         self.config = _Config()
         self.config.update(config)
 
     def log(
-        self,
-        data: Mapping[str, Any],
-        step: int | None = None,
-        commit: bool | None = None,
-        *_args: Any,
-        **_kwargs: Any,
+        self, data: Any, step: Any = None, commit: Any = None, *_a: Any, **_k: Any
     ) -> None:
         mirror_log(data, step=step, commit=commit)
 
     def __getattr__(self, name: str) -> Any:
         # finish, define_metric, save, watch, alert, ...: accepted and ignored.
         return lambda *args, **kwargs: None
-
-
-class _Media:
-    """Stand-in for ``wandb.Image``/``Table``/...; dropped by the flattener."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
 
 
 def generate_id() -> str:
@@ -333,18 +309,16 @@ def install_wandb_shim() -> None:
         "wandb.sdk.lib.runid",
     ):
         module: Any = types.ModuleType(name)
+        modules[name] = module
         module.__spec__ = ModuleSpec(name, loader=None, is_package=True)
         module.__path__ = []
+        module.generate_id = generate_id
         parent, _, child = name.rpartition(".")
         if parent:
             setattr(modules[parent], child, module)
-        modules[name] = module
-    modules["wandb.util"].generate_id = generate_id
-    modules["wandb.sdk.lib.runid"].generate_id = generate_id
     sys.modules.update(modules)
 
     shim = modules["wandb"]
-    shim._training_gym_dashboard_shim = True
     shim.run = None
     shim.config = _Config()
     shim.Settings = _Media

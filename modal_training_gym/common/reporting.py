@@ -289,8 +289,8 @@ def _enqueue_metric_points(payload: dict[str, Any], *, final: bool = False) -> N
         **payload,
         "final": final,
     }
-    try:
-        _REPORT_QUEUE.put_nowait(item)
+    try:  # the exit flush waits for room; the worker is still draining
+        _REPORT_QUEUE.put(item, block=final, timeout=_STEP_EVENT_TIMEOUT_SECONDS)
     except Exception:
         pass
 

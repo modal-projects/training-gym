@@ -84,12 +84,11 @@ from modal_training_gym.common.run_summary import (
     build_run_summaries,
 )
 from modal_training_gym.common.metric_series import (
-    DEFAULT_MAX_POINTS_PER_KEY,
     MAX_POINTS_PER_KEY,
     MetricPointsBatch,
     RunMetrics,
+    metric_series,
     metric_series_store,
-    series_response,
 )
 from modal_training_gym.common.step_timing import (
     RoleTimingRecord,
@@ -1427,6 +1426,12 @@ def fastapi_app():
                     training_run_id=update.training_run_id,
                     detail=str(exc),
                 )
+            if metric_entry := metric_cache.get(update.training_run_id):
+                try:
+                    async with metric_entry.lock:
+                        await _flush_metrics(update.training_run_id, metric_entry)
+                except Exception as exc:
+                    print(f"[dashboard] metric flush failed: {exc}", flush=True)
         return JSONResponse({"status": "ok", "framework_status": status.value})
 
     @web.post("/api/metric-points")
@@ -1453,13 +1458,7 @@ def fastapi_app():
         return JSONResponse({"status": "ok", "accepted": len(batch.points)})
 
     @web.get("/api/runs/{training_run_id}/metrics")
-    async def get_run_metrics(
-        training_run_id: str = FastAPIPath(),
-        keys: FacetParam = None,
-        max_points: int = Query(
-            default=DEFAULT_MAX_POINTS_PER_KEY, ge=1, le=MAX_POINTS_PER_KEY
-        ),
-    ):
+    async def get_run_metrics(training_run_id: str = FastAPIPath()):
         run = await _get_run_or_404(training_run_id)
         entry = await _metric_entry_for(training_run_id)
         async with entry.lock:
@@ -1479,13 +1478,8 @@ def fastapi_app():
                 TrainingRunStatus.FAILED,
             }:
                 await _flush_metrics(training_run_id, entry)
-            payload = series_response(
-                training_run_id,
-                entry.metrics.table,
-                keys=keys or None,
-                max_points=max_points,
-            )
-        return JSONResponse({**payload, "stale": stale})
+            series = metric_series(entry.metrics.table, MAX_POINTS_PER_KEY)
+        return JSONResponse({"series": series, "stale": stale})
 
     # ── Training rollouts ────────────────────────────────────────────────
 

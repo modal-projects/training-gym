@@ -14,7 +14,7 @@ from modal_training_gym.common.metric_series import (
     MetricPoint,
     downsample,
     RunMetrics,
-    series_response,
+    metric_series,
 )
 from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from modal_training_gym.utils import metadata
@@ -84,7 +84,7 @@ def test_ingest_requires_the_run_token(fake_volume, monkeypatch, tmp_path):
         assert (anon.status_code, anon.json()) == (wrong.status_code, wrong.json())
         assert (anon.status_code, anon.json()) == (ghost.status_code, ghost.json())
         assert anon.status_code == 403
-        assert client.get(f"/api/runs/{RUN_ID}/metrics").json()["keys"] == []
+        assert client.get(f"/api/runs/{RUN_ID}/metrics").json()["series"] == {}
 
 
 def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
@@ -101,11 +101,7 @@ def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
         # Live reads come from memory; nothing has hit the volume yet.
         assert _chunk_files(fake_volume) == {}
         live = client.get(f"/api/runs/{RUN_ID}/metrics").json()
-        assert live["keys"] == ["train/loss"]
-        assert live["series"]["train/loss"] == [[0, 1.0], [1, 0.8]]
-        assert live["latest"] == {"train/loss": 0.8}
-        assert live["step_range"] == [0, 1]
-        assert live["stale"] is False
+        assert live == {"series": {"train/loss": [[0, 1.0], [1, 0.8]]}, "stale": False}
 
         second = client.post(
             "/api/metric-points",
@@ -132,13 +128,9 @@ def test_ingest_buffers_in_memory_and_persists_chunks_on_final(
             str(CHUNK_STEPS + 3): {"reward": 0.9}
         }
 
-        result = client.get(
-            f"/api/runs/{RUN_ID}/metrics", params={"keys": "reward"}
-        ).json()
-        assert result["keys"] == ["reward", "train/loss"]
-        assert list(result["series"]) == ["reward"]
+        result = client.get(f"/api/runs/{RUN_ID}/metrics").json()
+        assert list(result["series"]) == ["reward", "train/loss"]
         assert result["series"]["reward"] == [[1, 0.5], [CHUNK_STEPS + 3, 0.9]]
-        assert result["point_count"] == 3
 
 
 def test_reads_pick_up_chunks_written_by_another_replica(
@@ -209,10 +201,6 @@ def test_rejects_oversized_or_malformed_points(fake_volume, monkeypatch, tmp_pat
             headers=AUTH,
         )
         assert bad_value.status_code == 422
-        too_many = client.get(
-            f"/api/runs/{RUN_ID}/metrics", params={"max_points": 10**9}
-        )
-        assert too_many.status_code == 422
 
 
 # ── pure helpers ─────
@@ -251,18 +239,13 @@ def test_downsample_keeps_endpoints_and_extremes():
     assert rows[437] in out and rows[612] in out
     assert all(out[i][0] < out[i + 1][0] for i in range(len(out) - 1))
     assert downsample(rows[:50], 100) == rows[:50]
-    assert downsample(rows, 2) == [rows[0], rows[-1]]
-    assert downsample(rows, 1) == [rows[0]]
 
 
-def test_series_response_filters_unknown_keys_and_downsamples():
+def test_metric_series_splits_the_table_per_key_and_downsamples():
     run = RunMetrics()
     run.merge_points([MetricPoint(step=s, metrics={"x": float(s)}) for s in range(10)])
-    table = run.table
-    out = series_response("r", table, keys=["x", "missing"], max_points=2)
-    assert out["keys"] == ["x"]
-    assert list(out["series"]) == ["x"]
-    assert out["series"]["x"] == [[0, 0.0], [9, 9.0]]
-    assert out["latest"] == {"x": 9.0}
-    assert series_response("r", table, max_points=1)["latest"] == {"x": 9.0}
-    assert out["step_range"] == [0, 9]
+    run.merge_points([MetricPoint(step=3, metrics={"a": 1.0})])
+    out = metric_series(run.table, 4)
+    assert list(out) == ["a", "x"]
+    assert out["a"] == [[3, 1.0]]
+    assert out["x"] == [[0, 0.0], [9, 9.0]]

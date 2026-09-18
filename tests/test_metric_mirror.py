@@ -143,8 +143,13 @@ def test_enqueue_metric_points_derives_url_and_retries(monkeypatch):
     monkeypatch.setenv(
         "TRAINING_GYM_FRAMEWORK_STATUS_URL", "https://dash.test/api/framework-status"
     )
-    items = []
-    monkeypatch.setattr(reporting._REPORT_QUEUE, "put_nowait", items.append)
+    items, blocking = [], []
+
+    def put(item, block=True, timeout=None):
+        items.append(item)
+        blocking.append(block)
+
+    monkeypatch.setattr(reporting._REPORT_QUEUE, "put", put)
     monkeypatch.setattr(reporting, "_ensure_worker", lambda **kw: None)
     monkeypatch.setattr(reporting, "_REPORTER_DRAINING", False)
     reporting._enqueue_metric_points({"training_run_id": "r", "points": []})
@@ -152,6 +157,7 @@ def test_enqueue_metric_points_derives_url_and_retries(monkeypatch):
     assert {item["_url"] for item in items} == {"https://dash.test/api/metric-points"}
     assert [item["_retry_count"] for item in items] == [1, 3]
     assert [item["final"] for item in items] == [False, True]
+    assert blocking == [False, True]  # the exit flush waits for queue room
     assert [reporting._is_final_timing(item) for item in items] == [False, True]
 
     monkeypatch.setattr(reporting, "_REPORTER_DRAINING", True)

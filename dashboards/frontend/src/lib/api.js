@@ -204,32 +204,11 @@ export async function fetchRunTimings(trainingRunId, { signal } = {}) {
   return await res.json();
 }
 
-// Scalar metrics mirrored from wandb/trackio (`/api/metric-points`). Returns
-// `{ keys, series: { key: [[step, value, ts], ...] }, latest, step_range,
-// point_count, stale }`, downsampled server-side to `maxPoints` per key.
-export async function fetchRunMetrics(
-  trainingRunId,
-  { signal, keys = [], maxPoints = 1000 } = {},
-) {
-  const params = new URLSearchParams();
-  for (const key of keys) params.append("keys", key);
-  if (maxPoints != null) params.set("max_points", String(maxPoints));
-  const query = params.toString();
-  const res = await fetch(
-    `${SERVER}/runs/${encodeURIComponent(trainingRunId)}/metrics${query ? `?${query}` : ""}`,
-    { signal },
-  );
+// Scalar metrics mirrored from wandb/trackio: `{ series: { key: [[step, value], ...] }, stale }`.
+export async function fetchRunMetrics(trainingRunId, { signal } = {}) {
+  const res = await fetch(`${SERVER}/runs/${encodeURIComponent(trainingRunId)}/metrics`, { signal });
   if (!res.ok) throw new Error(await getErrorFromResponse(res));
-  const data = await res.json();
-  const series = data && typeof data.series === "object" && data.series ? data.series : {};
-  return {
-    keys: Array.isArray(data?.keys) ? data.keys.filter((k) => typeof k === "string") : [],
-    series,
-    latest: data && typeof data.latest === "object" && data.latest ? data.latest : {},
-    step_range: Array.isArray(data?.step_range) ? data.step_range : null,
-    point_count: Number(data?.point_count) || 0,
-    stale: Boolean(data?.stale),
-  };
+  return await res.json();
 }
 
 // One step's full per-group advantage distribution (for drill-in).

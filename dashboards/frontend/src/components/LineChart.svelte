@@ -14,11 +14,8 @@
     lines = [],
     smoothable = false,
     smoothingWindow = 5,
-    // When set, smoothing is controlled by the parent (no checkbox is drawn).
-    smoothed = null,
-    // W&B-style panel: fit the y range to the data instead of anchoring it
-    // at zero, draw tick labels + gridlines, and leave the wheel to the page
-    // (drag still zooms).
+    // W&B-style panel: y range fit to the data, tick labels + gridlines,
+    // wheel left to the page (drag still zooms).
     axes = false,
     ariaLabel = title || "Line chart",
     formatX = (row) => String(row?.x ?? ""),
@@ -66,7 +63,7 @@
       })
       .filter((row) => Number.isFinite(row.x) && row.y != null);
   });
-  let smoothingOn = $derived(smoothable && (smoothed ?? smoothing));
+  let smoothingOn = $derived(smoothable && smoothing);
   let allRows = $derived(
     smoothingOn ? trailingMean(rawRows, seriesKeys, smoothingWindow) : rawRows,
   );
@@ -249,7 +246,7 @@
           {/each}
         </div>
       {/if}
-      {#if smoothable && smoothed == null}
+      {#if smoothable}
         <label
           class="inline-flex items-center gap-[5px] text-[11px] text-(--muted) cursor-pointer select-none"
           title={`Trailing mean over the last ${smoothingWindow} steps`}

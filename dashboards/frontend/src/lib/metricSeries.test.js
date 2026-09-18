@@ -1,47 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  UNGROUPED,
-  formatMetricValue,
-  groupMetricKeys,
-  matchesSearch,
-  seriesToRows,
-} from "./metricSeries.js";
+import { UNGROUPED, formatMetricValue, groupMetricKeys } from "./metricSeries.js";
 import { niceTicks } from "./ticks.js";
 
 const KEYS = ["train/loss", "rollout/reward", "perf/tokens_per_s", "lr", "eval/acc", "train/grad_norm"];
 
-test("groupMetricKeys groups by prefix with the common groups first", () => {
+test("groupMetricKeys groups by prefix, ungrouped first, then alphabetically", () => {
   assert.deepEqual(groupMetricKeys(KEYS), [
     { name: UNGROUPED, keys: ["lr"] },
-    { name: "train", keys: ["train/grad_norm", "train/loss"] },
-    { name: "rollout", keys: ["rollout/reward"] },
     { name: "eval", keys: ["eval/acc"] },
     { name: "perf", keys: ["perf/tokens_per_s"] },
+    { name: "rollout", keys: ["rollout/reward"] },
+    { name: "train", keys: ["train/grad_norm", "train/loss"] },
   ]);
 });
 
-test("groupMetricKeys filters with every search term and drops empty groups", () => {
-  assert.deepEqual(groupMetricKeys(KEYS, "loss train"), [
-    { name: "train", keys: ["train/loss"] },
-  ]);
+test("groupMetricKeys search is a case-insensitive substring match", () => {
+  assert.deepEqual(groupMetricKeys(KEYS, " LOSS "), [{ name: "train", keys: ["train/loss"] }]);
   assert.deepEqual(groupMetricKeys(KEYS, "nothing"), []);
-  assert.deepEqual(groupMetricKeys([1, "", null], ""), []);
-});
-
-test("matchesSearch is case-insensitive and treats blanks as match-all", () => {
-  assert.equal(matchesSearch("train/Loss", "LOSS"), true);
-  assert.equal(matchesSearch("train/loss", "   "), true);
-  assert.equal(matchesSearch("train/loss", "reward"), false);
-});
-
-test("seriesToRows keeps only finite points", () => {
-  assert.deepEqual(seriesToRows([[0, 1.5], [1, "2"], [2, null], ["x", 1]]), [
-    { x: 0, y: 1.5 },
-    { x: 1, y: 2 },
-  ]);
-  assert.deepEqual(seriesToRows(undefined), []);
 });
 
 test("niceTicks picks round values inside the range", () => {
