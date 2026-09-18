@@ -686,8 +686,8 @@ def fastapi_app():
     timing_cache_lock = asyncio.Lock()
 
     # ── Mirrored scalar metrics ──────────────────────────────────────────
-    # One in-memory table per run; dirty chunks hit the volume every few
-    # seconds (or on the final batch), the same way timing events do. Each
+    # One in-memory table per run; a background loop writes dirty chunks to
+    # the volume every few seconds (sooner on the final batch). Each
     # container writes its own copy of a chunk (``chunk-000001-<writer>``) and
     # readers merge every copy (newest ingest per step wins), so autoscaled
     # replicas can't clobber each other.
@@ -700,7 +700,6 @@ def fastapi_app():
             self.metrics = RunMetrics()
             self.dirty: set[str] = set()
             self.loaded_at: float | None = None
-            self.flushed_at = time.monotonic()
             self.lock = asyncio.Lock()
 
     metric_cache: dict[str, MetricEntry] = {}
@@ -735,7 +734,33 @@ def fastapi_app():
                 is_async=True,
             )
             entry.dirty.clear()
-            entry.flushed_at = time.monotonic()
+
+    async def _flush_dirty_metrics() -> None:
+        for training_run_id, entry in list(metric_cache.items()):
+            if entry.dirty:
+                try:
+                    async with entry.lock:
+                        await _flush_metrics(training_run_id, entry)
+                except Exception as exc:
+                    print(f"[dashboard] metric flush failed: {exc}", flush=True)
+
+    async def _metric_flush_loop() -> None:
+        while True:
+            await asyncio.sleep(METRIC_FLUSH_INTERVAL_S)
+            await _flush_dirty_metrics()
+
+    metric_flush_task: asyncio.Task[None] | None = None
+
+    @web.on_event("startup")
+    async def _start_metric_flush_loop() -> None:
+        nonlocal metric_flush_task
+        metric_flush_task = asyncio.create_task(_metric_flush_loop())
+
+    @web.on_event("shutdown")
+    async def _stop_metric_flush_loop() -> None:
+        if metric_flush_task is not None:
+            metric_flush_task.cancel()
+        await _flush_dirty_metrics()
 
     def _rebuild_timing_lanes(entry: TimingEntry) -> None:
         records = dict(entry.persisted_records)
@@ -1450,10 +1475,7 @@ def fastapi_app():
                         status_code=503, detail="Metric store unavailable"
                     )
             entry.dirty |= entry.metrics.merge_points(batch.points)
-            if (
-                batch.final
-                or time.monotonic() - entry.flushed_at >= METRIC_FLUSH_INTERVAL_S
-            ):
+            if batch.final:
                 await _flush_metrics(batch.training_run_id, entry)
         return JSONResponse({"status": "ok", "accepted": len(batch.points)})
 
@@ -1477,7 +1499,10 @@ def fastapi_app():
                 TrainingRunStatus.COMPLETED,
                 TrainingRunStatus.FAILED,
             }:
-                await _flush_metrics(training_run_id, entry)
+                try:
+                    await _flush_metrics(training_run_id, entry)
+                except Exception:
+                    stale = True
             series = metric_series(entry.metrics.table, MAX_POINTS_PER_KEY)
         return JSONResponse({"series": series, "stale": stale})
 

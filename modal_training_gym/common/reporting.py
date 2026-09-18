@@ -537,13 +537,12 @@ def _compact_report_queue() -> None:
                 remaining.append(item)
                 continue
             url = str(item.get("_url", "")).rstrip("/")
-            is_timing = url.endswith("/api/timing-events")
-            if is_timing and not item.get("final", False):
+            if _is_final_timing(item):
+                final_priority.append(item)
+            elif url.endswith("/api/timing-events"):
                 discarded += 1
                 continue
-            if is_timing and item.get("final", False):
-                final_priority.append(item)
-            elif is_timing or url.endswith("/api/framework-status"):
+            elif url.endswith("/api/framework-status"):
                 status_priority.append(item)
             else:
                 remaining.append(item)

@@ -167,6 +167,24 @@ def test_enqueue_metric_points_derives_url_and_retries(monkeypatch):
     assert len(items) == 3
 
 
+def test_drain_compaction_moves_final_metric_batches_to_the_front(monkeypatch):
+    metrics_url = "https://dash.test/api/metric-points"
+    queue = reporting._REPORT_QUEUE
+    while not queue.empty():
+        queue.get_nowait()
+    for item in (
+        {"_url": metrics_url, "final": False, "n": 1},
+        {"_url": "https://dash.test/api/timing-events", "final": False},
+        {"_url": "https://dash.test/api/framework-status", "n": 2},
+        {"_url": metrics_url, "final": True, "n": 3},
+    ):
+        queue.put_nowait(item)
+    reporting._compact_report_queue()
+    assert [item["n"] for item in queue.queue] == [3, 2, 1]
+    while not queue.empty():
+        queue.get_nowait()
+
+
 # ── config wiring ─────
 
 

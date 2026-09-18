@@ -183,6 +183,33 @@ def test_reading_a_finished_run_persists_whatever_is_still_buffered(
         assert list(_chunk_files(fake_volume)) == [f"chunk-000000-{WRITER}.json"]
 
 
+def test_shutdown_flushes_buffered_points(fake_volume, monkeypatch, tmp_path):
+    _save_run()
+    with _client(monkeypatch, tmp_path) as client:
+        client.post("/api/metric-points", json=_batch([(0, {"a": 1.0})]), headers=AUTH)
+        assert _chunk_files(fake_volume) == {}
+    assert _chunk_files(fake_volume)[f"chunk-000000-{WRITER}.json"]["steps"] == {
+        "0": {"a": 1.0}
+    }
+
+
+def test_finished_run_read_serves_memory_when_the_volume_is_down(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_run(TrainingRunStatus.COMPLETED)
+    with _client(monkeypatch, tmp_path) as client:
+        client.post("/api/metric-points", json=_batch([(0, {"a": 1.0})]), headers=AUTH)
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("volume down")
+
+        monkeypatch.setattr(_dashboard, "_metadata_vol_list", boom)
+        monkeypatch.setattr(_dashboard, "_metadata_vol_put_many", boom)
+        result = client.get(f"/api/runs/{RUN_ID}/metrics")
+        assert result.status_code == 200
+        assert result.json() == {"series": {"a": [[0, 1.0]]}, "stale": True}
+
+
 def test_rejects_oversized_or_malformed_points(fake_volume, monkeypatch, tmp_path):
     _save_run()
     with _client(monkeypatch, tmp_path) as client:
