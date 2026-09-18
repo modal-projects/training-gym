@@ -38,9 +38,11 @@
     stepDomain = null;
   });
   // Poll while the run is live or the dashboard still has points buffered.
+  // (`stale` is a derived boolean so a fresh payload only reruns this when it flips.)
+  let stale = $derived(payload?.stale ?? false);
   $effect(() => {
     const id = runId;
-    const poll = isRunning || payload?.stale;
+    const poll = isRunning || stale;
     if (!id) return;
     const controller = new AbortController();
     load(id, controller.signal);
