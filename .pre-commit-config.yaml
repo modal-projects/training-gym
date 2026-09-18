@@ -20,6 +20,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^(scripts/generate_quickstart\.py|scripts/quickstart\.py|README\.md)$
+      - id: regenerate-api-reference
+        name: Regenerate API reference (scripts/generate_api_reference.py)
+        entry: uv run scripts/generate_api_reference.py
+        language: system
+        pass_filenames: false
+        files: ^(scripts/generate_api_reference\.py|scripts/api_reference_manifest\.py|modal_training_gym/(cli/.*\.py|__init__\.py|_api_reference\.py|(train|deploy)_recipes/.*_recipe/__init__\.py)|docs-next/src/(generated/reference-sidebar\.json|content/docs/reference/.*))$
       - id: regenerate-llms-txt
         name: Regenerate llms.txt (scripts/generate_llms_txt.py)
         entry: uv run python -m scripts.generate_llms_txt
