@@ -60,7 +60,7 @@ Reads to Trackio are open unless you've set a [dashboard password](https://gym.m
 training-gym set-password
 ```
 
-Training containers keep logging either way, since they authenticate with the write token instead. The password is read at container startup, so rerun `deploy_to_modal()` after changing it.
+Training containers keep logging either way, since they authenticate with the write token instead. The password is read at container startup, so rerun `deploy_to_modal()` after changing it. `set-password` prints a warning if it finds the default Modal Trackio app.
 
 ### Deploy on a Hugging Face Space
 

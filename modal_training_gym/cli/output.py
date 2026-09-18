@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from rich.console import Console, RenderableType
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Column, Table
 from rich.text import Text
@@ -83,3 +84,9 @@ def print_error(message: str) -> None:
         )
     else:
         console.print(message, markup=False)
+
+
+def print_warning(message: str) -> None:
+    Console(stderr=True, highlight=False).print(
+        f"[bold yellow]Warning:[/bold yellow] {escape(message)}"
+    )
