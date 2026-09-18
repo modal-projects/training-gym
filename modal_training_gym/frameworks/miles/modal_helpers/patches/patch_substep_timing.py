@@ -178,6 +178,14 @@ def _wrap_driver_loop(src: str, path: Path) -> str:
 
 
 def _wrap_bootstrap_sync(src: str, path: Path) -> str:
+    if "initial_weight_sync_task = None" in src:
+        anchor = "        await actor_model.update_weights()\n"
+        replacement = (
+            "        with _tg_role('driver', None) as _tg_rec:\n"
+            "            with _tg_rec.phase('initial_weight_sync'):\n"
+            "                await actor_model.update_weights()\n"
+        )
+        return replace_once(src, anchor, replacement, path)
     anchor = (
         "    # always update weight first so that sglang has the loaded weights from training.\n"
         "    await actor_model.update_weights()\n"
@@ -496,6 +504,12 @@ def wrap_scope(src: str, scope: tuple[str, str, str], path: Path) -> str:
     and last lines: the phases inside it are already rewritten by now.
     """
     signature, last_line, header = scope
+    if (
+        last_line not in src
+        and last_line
+        == "        return dict(sample_indices=sample_indices, data_ref=data_ref)\n"
+    ):
+        last_line = "        return dict(sample_indices=sample_indices, **data_pack)\n"
     if src.count(signature) != 1:
         raise RuntimeError(
             f"{path}: expected 1 occurrence of {signature.strip()!r}, "
@@ -571,12 +585,23 @@ def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
 
     src = _inject_preamble(src)
     if path.name == "train_async.py":
+        initial_sync_wait = (
+            "        if initial_weight_sync_task is not None:\n"
+            "            await initial_weight_sync_task\n"
+            "            initial_weight_sync_task = None\n"
+            if "initial_weight_sync_task = None" in src
+            else ""
+        )
         src = replace_once(
             src,
-            _ASYNC_EVAL_BEFORE,
+            _ASYNC_EVAL_BEFORE.replace(
+                "        await eval_dispatcher",
+                initial_sync_wait + "        await eval_dispatcher",
+            ),
             (
                 "    if args.eval_interval is not None and args.start_rollout_id == 0 and not args.skip_eval_before_train:\n"
-                "        if not args.eval_uses_snapshots:\n"
+                + initial_sync_wait
+                + "        if not args.eval_uses_snapshots:\n"
                 "            with _tg_role('driver', None) as _tg_rec:\n"
                 "                # PATCHED_TRAINING_GYM_TIMING_EVALUATE_ROLLOUTS\n"
                 "                with _tg_rec.phase('evaluate_rollouts'):\n"
@@ -601,6 +626,11 @@ def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
             path,
         )
     for old, phase in wraps:
+        if phase == "wait_for_next_rollout" and "live_weight_sync_can_overlap" in src:
+            old = (
+                "                rollout_data_curr_ref = (await x) if (x := rollout_data_next_future) is not None else None\n"
+                "                rollout_data_next_future = None\n"
+            )
         src = replace_once(src, old, wrap_block(old, phase), path)
     if path.name == "train_async.py":
         drain = "    await eval_dispatcher.drain()\n"

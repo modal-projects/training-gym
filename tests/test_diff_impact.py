@@ -37,6 +37,20 @@ def test_flat_tutorial_diff_maps_to_tutorial() -> None:
     }
 
 
+def test_stitch_shared_module_diff_maps_to_stitch_recipe() -> None:
+    for module in ("train.py", "serve.py"):
+        path = f"modal_training_gym/train_recipes/stitch_recipe/{module}"
+        diff = (
+            f"diff --git a/{path} b/{path}\n"
+            "index 1234567..89abcde 100644\n"
+            f"--- a/{path}\n"
+            f"+++ b/{path}\n"
+            "@@ -1,3 +1,3 @@\n"
+        )
+
+        assert "Qwen3_30B_A3B_Stitch_Recipe" in analyze_diff(diff).affected_classes
+
+
 def test_tutorial_slug_for_path_reads_discovered_slug() -> None:
     flat_main = TUTORIAL_SRC_ROOT / "main.py"
     nested_main = TUTORIAL_SRC_ROOT / "nested" / "main.py"

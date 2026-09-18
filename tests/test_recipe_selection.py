@@ -24,6 +24,7 @@ from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
 )
 from modal_training_gym.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
 from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 
 _RECIPE_PACKAGES = (
@@ -31,9 +32,17 @@ _RECIPE_PACKAGES = (
     "modal_training_gym.train_recipes.miles_recipe",
 )
 
+
+def _stitch_trainer_recipe(model_config: Any) -> MilesRecipe | None:
+    """A stitch recipe's actor cluster lives on its trainer half."""
+    recipe = StitchRecipe.get_base_recipe(model_config)
+    return recipe.train if recipe is not None else None
+
+
 _BASE_RECIPE = {
     Framework.SLIME: SlimeRecipe.get_base_recipe,
     Framework.MILES: MilesRecipe.get_base_recipe,
+    Framework.STITCH: _stitch_trainer_recipe,
 }
 
 

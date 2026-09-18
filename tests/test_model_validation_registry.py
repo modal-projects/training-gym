@@ -113,7 +113,9 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     )
     assert recipe is not None
     assert dataset is not None
-    assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
+    # A disaggregated recipe carries the reward model on its trainer half.
+    trainer = getattr(recipe, "train", recipe)
+    assert trainer.rm_type, f"{config.name} validation recipe has no rm_type"
 
 
 def test_list_prints_every_registered_model():

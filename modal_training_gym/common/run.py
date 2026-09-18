@@ -365,7 +365,18 @@ class TrainingRun(BaseModel):
         timeout: float | None = None,
         stop_app_on_success: bool = True,
     ) -> "TrainingRun":
-        self.wait(timeout=timeout)
+        try:
+            self.wait(timeout=timeout)
+        except TimeoutError:
+            if self.framework is Framework.STITCH:
+                self._reload()
+                if self.status in (TrainingRunStatus.FAILED, TrainingRunStatus.STOPPED):
+                    self.close()
+            raise
+        except Exception:
+            if self.framework is Framework.STITCH:
+                self.close()
+            raise
         if stop_app_on_success:
             self.close()
         print(f"Training complete: {self.training_run_id}")

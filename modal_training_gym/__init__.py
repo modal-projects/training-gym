@@ -135,6 +135,10 @@ _EXPORTS = {
         "modal_training_gym.deploy_recipes.vllm_recipe",
         "Qwen3_4B_VllmRecipe",
     ),
+    "Qwen3_30B_A3B_Stitch_Recipe": (
+        "modal_training_gym.train_recipes.stitch_recipe",
+        "Qwen3_30B_A3B_Stitch_Recipe",
+    ),
     "Qwen3_5_0_8B": ("modal_training_gym.common.models", "Qwen3_5_0_8B"),
     "Qwen3_5_0_8B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
@@ -220,6 +224,15 @@ _EXPORTS = {
         "SglangRecipe",
     ),
     "SlimeRecipe": ("modal_training_gym.train_recipes.slime_recipe", "SlimeRecipe"),
+    "StitchRecipe": ("modal_training_gym.train_recipes.stitch_recipe", "StitchRecipe"),
+    "StitchServeConfig": (
+        "modal_training_gym.train_recipes.stitch_recipe",
+        "StitchServeConfig",
+    ),
+    "StitchTrainConfig": (
+        "modal_training_gym.train_recipes.stitch_recipe",
+        "StitchTrainConfig",
+    ),
     "ToolCall": ("modal_training_gym.common.models", "ToolCall"),
     "TrainConfig": ("modal_training_gym.common.train", "TrainConfig"),
     "TrainingGymConfigError": (
@@ -304,6 +317,7 @@ __all__ = [
     "Qwen3_8B_SglangRecipe",
     "Qwen3_8B_VllmRecipe",
     "Qwen3_30B",
+    "Qwen3_30B_A3B_Stitch_Recipe",
     "Qwen3_30B_SglangRecipe",
     "Qwen3_30B_VllmRecipe",
     "Qwen3_6_35B",
@@ -321,6 +335,9 @@ __all__ = [
     "score_in_sandbox",
     "SglangRecipe",
     "SlimeRecipe",
+    "StitchRecipe",
+    "StitchServeConfig",
+    "StitchTrainConfig",
     "ToolCall",
     "TrainConfig",
     "TrainingGymConfigError",

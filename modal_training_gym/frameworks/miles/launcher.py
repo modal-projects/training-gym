@@ -80,6 +80,11 @@ from modal_training_gym.train_recipes.miles_recipe.recipe import (
     MilesRecipe,
 )
 from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
+from modal_training_gym.frameworks.miles.modal_helpers.patches import (
+    REPORTING_PATCH_COMMANDS,
+    SGLANG_ABORT_PATCH_COMMAND,
+    SUBSTEP_TIMING_PATCH_COMMAND,
+)
 from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     build_train_cmd,
     get_checkpoint_conversion_policy,
@@ -123,19 +128,6 @@ RDMA_RUNTIME_INSTALL_COMMAND = (
 # policies ("limit"/"ignore"), letting sandboxes burst on Modal and bill by
 # actual CPU-/RAM-second usage instead of over-provisioning a static reservation.
 HARBOR_PKG_VERSION = "0.8.0"
-
-_MILES_PATCHES = Path(__file__).parent / "modal_helpers" / "patches"
-_PATCH_SGLANG_ABORT_B64 = encode_patch("patch_sglang_abort", _MILES_PATCHES)
-_PATCH_ROLLOUT_STATUS_B64 = encode_patch(
-    "patch_rollout_status_reporting", _MILES_PATCHES
-)
-_PATCH_ADVANTAGE_DIST_B64 = encode_patch("patch_advantage_distribution", _MILES_PATCHES)
-_PATCH_SUBSTEP_TIMING_B64 = encode_patch("patch_substep_timing", _MILES_PATCHES)
-
-_REPORTING_PATCH_COMMANDS = (
-    f"echo {_PATCH_ROLLOUT_STATUS_B64} | base64 -d | python3",
-    f"echo {_PATCH_ADVANTAGE_DIST_B64} | base64 -d | python3",
-)
 
 _PATCH_DIST_CKPT_QUANTIZED_B64 = encode_patch(
     "patch_dist_ckpt_quantized", _MEGATRON_PATCHES
@@ -342,7 +334,7 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         .entrypoint([])
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3",
+            SGLANG_ABORT_PATCH_COMMAND,
             f"echo {_PATCH_DIST_CKPT_QUANTIZED_B64} | base64 -d | python3",
             f"echo {_PATCH_DIST_CKPT_NOFORK_B64} | base64 -d | python3",
             (
@@ -351,8 +343,8 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
                 f"else echo 'WARNING: {_MEGATRON_TORCH_STRATEGY_PY} not found, "
                 "skipping checkpoint-save patch'; fi"
             ),
-            *_REPORTING_PATCH_COMMANDS,
-            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3",
+            *REPORTING_PATCH_COMMANDS,
+            SUBSTEP_TIMING_PATCH_COMMAND,
         )
     )
     if (
@@ -444,13 +436,13 @@ def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
             f"cd {MILES_ROOT} && git fetch --depth=1 -- origin"
             f" {shlex.quote(miles.miles_git_ref)} && git checkout -f FETCH_HEAD",
             # The checkout just reverted the patched miles sources.
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
+            SGLANG_ABORT_PATCH_COMMAND
+            + " || echo 'WARNING: sglang abort patch did not apply to the"
             " miles_git_ref checkout; transient router failures during rollout"
             " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
-            f"echo {_PATCH_SUBSTEP_TIMING_B64} | base64 -d | python3"
-            " || echo 'WARNING: substep timing patch did not apply to the"
+            *REPORTING_PATCH_COMMANDS,
+            SUBSTEP_TIMING_PATCH_COMMAND
+            + " || echo 'WARNING: substep timing patch did not apply to the"
             " miles_git_ref checkout; substep timings will be missing'",
         )
     return image
@@ -498,11 +490,11 @@ def build_miles_app(
         # The local checkout just overwrote the patched miles sources;
         # re-apply the built-in patches.
         image = image.run_commands(
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
+            SGLANG_ABORT_PATCH_COMMAND
+            + " || echo 'WARNING: sglang abort patch did not apply to the"
             " local_miles checkout; transient router failures during rollout"
             " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
+            *REPORTING_PATCH_COMMANDS,
         )
 
     image = apply_source_overlays(image, miles)
