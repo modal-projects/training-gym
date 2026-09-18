@@ -213,11 +213,6 @@ DEFAULT_MODAL_ENVIRONMENT = "main"
 
 
 def active_modal_environment() -> str:
-    """Environment name Modal uses to resolve apps, Volumes, and Secrets.
-
-    ``MODAL_ENVIRONMENT`` wins, then the active ``~/.modal.toml`` profile's
-    ``environment``, then Modal's default ``main``.
-    """
     env = os.environ.get("MODAL_ENVIRONMENT", "").strip()
     if env:
         return env
@@ -398,7 +393,6 @@ def _format_value(value: Any) -> str:
 
 
 def _iter_modal_profiles() -> list[tuple[str, dict[str, Any]]]:
-    """``~/.modal.toml`` profiles in Modal's selection order, unique."""
     if not MODAL_CONFIG_PATH.is_file():
         return []
 

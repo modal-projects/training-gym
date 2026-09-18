@@ -239,14 +239,28 @@ def set_password(password: str | None = None) -> None:
     else:
         print("Dashboard password cleared (open access). Redeploying...")
 
-    from modal_training_gym.common.config import get_dashboard_proxy_auth
-    from modal_training_gym.common.trackio import redeploy_trackio_for_password
+    from modal_training_gym.common.config import (
+        get_dashboard_proxy_auth,
+        get_trackio_deploy,
+    )
+    from modal_training_gym.common.trackio import TrackioConfig, deployed_trackio_url
 
     setup(
         interactive=False,
         require_proxy_auth=get_dashboard_proxy_auth() is True,
     )
-    redeploy_trackio_for_password()
+    spec = get_trackio_deploy()
+    if spec is None:
+        if deployed_trackio_url():
+            print(
+                "Skipping Trackio redeploy. Run TrackioConfig.deploy_to_modal(...) or "
+                "`training-gym trackio setup`, then set-password again."
+            )
+        return
+    if not deployed_trackio_url(spec["app_name"]):
+        return
+    print("Redeploying Trackio dashboard so the password takes effect...")
+    TrackioConfig.deploy_to_modal(**spec)
 
 
 def open_dashboard() -> str | None:

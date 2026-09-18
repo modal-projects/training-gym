@@ -602,11 +602,6 @@ def test_a_bare_config_resolves_to_the_deployed_server(monkeypatch):
     ],
 )
 def test_launcher_resolves_setup_only_trackio_before_preflight(build_app, metrics):
-    """preflight_trackio only asserts a destination, and it runs in-container.
-
-    Both launchers must resolve a setup-only TrackioConfig first, or Miles
-    raises and metrics never leave the training container.
-    """
     source = inspect.getsource(build_app)
     assert source.index(f"resolve_trackio_destination({metrics})") < source.index(
         f"apply_metric_image(image, {metrics})"
