@@ -21,7 +21,10 @@ _BASE_ENVIRONMENT = {
     "SGLANG_ENABLE_UNIFIED_RADIX_TREE": "1",
     "SGLANG_OPT_USE_INKLING_FUSED_AR_SCONV_NORM": "false",
     "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
-    "MILES_SGLANG_DUMMY_LOAD": "0",
+    # SGLang boots with dummy weights and takes the real ones from the actor on
+    # the first sync. Loading the 33-shard checkpoint on every engine rank while
+    # the actors load theirs OOM-kills the scheduler on H200 hosts.
+    "MILES_SGLANG_DUMMY_LOAD": "1",
     "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1",
     "RAY_memory_monitor_refresh_ms": "0",
 }
@@ -78,9 +81,6 @@ class _InklingSmallRecipe(MilesRecipe):
     convert_ephemeral_disk_mb: int | None = 1024 * 1024
 
     actor_num_gpus_per_node: int = 8
-
-    global_batch_size: int = 8
-    rollout_batch_size: int = 4
 
     recompute_granularity: str = "full"
     recompute_method: str = "uniform"
@@ -193,8 +193,6 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     # One engine spans 2 nodes.
     rollout_num_gpus_per_engine: int = 16
 
-    sglang_context_length: int = 4096
-
     # Dynamic token packing exposes a PP-p2p x EP-all-to-all NCCL launch-order race
     # on varlen shapes, so upstream pins a fixed micro-batch for full-parameter runs.
     # This overrides MilesRecipe's use_dynamic_batch_size=True default.
@@ -235,7 +233,6 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     """Inkling-Small rank-32 LoRA recipe."""
 
     gpu_type: str = "B300"
-    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image"})
     lr: float = 2e-4
     memory: tuple[int, int] = (1792 * 1024, 2048 * 1024)
 
@@ -244,6 +241,10 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     expert_model_parallel_size: int = 8
     sglang_ep_size: int | None = 8
     rollout_num_gpus_per_engine: int = 8
+
+    # TP1/PP1 over 8 GPUs is DP8, so the global batch must be a multiple of 8.
+    rollout_batch_size: int = 4
+    global_batch_size: int = 8
 
     lora_rank: int | None = 32
     lora_alpha: int | None = 32
@@ -266,13 +267,3 @@ class Inkling_Small_LoRA_Recipe(_InklingSmallRecipe):
     offload_rollout: bool = True
     train_memory_margin_bytes: int = 128 * 1024 * 1024
     rollout_health_check_first_wait: int = 300
-
-    # SGLang boots with dummy weights and takes the real ones from the actor on
-    # the first sync, so two full copies of Inkling are never resident at once.
-    environment: dict[str, str] = field(
-        default_factory=lambda: {
-            **_BASE_ENVIRONMENT,
-            "NCCL_MNNVL_ENABLE": "0",
-            "MILES_SGLANG_DUMMY_LOAD": "1",
-        }
-    )

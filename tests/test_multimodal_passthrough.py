@@ -229,14 +229,11 @@ def test_recipe_active_modalities():
         model=Inkling_Small(),
         recipe=Inkling_Small_Recipe(modality="vision"),
     )
-    with pytest.raises(
-        ValidationError, match="Inkling_Small_LoRA_Recipe cannot train audio"
-    ):
-        TrainConfig(
-            dataset=_mm("audio"),
-            model=Inkling_Small(),
-            recipe=Inkling_Small_LoRA_Recipe(modality="audio"),
-        )
+    TrainConfig(
+        dataset=_mm("audio"),
+        model=Inkling_Small(),
+        recipe=Inkling_Small_LoRA_Recipe(modality="audio"),
+    )
     with pytest.raises(
         ValidationError, match="Qwen3_5_4B_Miles_Recipe cannot serve image"
     ):

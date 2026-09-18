@@ -162,5 +162,17 @@ VALIDATION_CONFIGS: set[_ValidationConfig] = {
         modality="audio",
     ),
     _ValidationConfig("Inkling-Small-LoRA", Inkling_Small_LoRA, Framework.MILES),
+    _ValidationConfig(
+        "Inkling-Small-LoRA/image",
+        Inkling_Small_LoRA,
+        Framework.MILES,
+        modality="image",
+    ),
+    _ValidationConfig(
+        "Inkling-Small-LoRA/audio",
+        Inkling_Small_LoRA,
+        Framework.MILES,
+        modality="audio",
+    ),
     _ValidationConfig("DeepSeek-V4.1-Flash", DeepSeek_V4_1_Flash, Framework.MILES),
 }
