@@ -42,6 +42,8 @@ _MAX_UNACKNOWLEDGED_TIMING_FINALS = 128
 _PHASE_PATH = "/api/framework-status"
 _ROLLOUT_PATH = "/api/training-rollouts"
 _ADVANTAGE_PATH = "/api/advantage-distributions"
+_METRIC_POINTS_PATH = "/api/metric-points"
+MAX_METRIC_POINTS_PER_BATCH = 5000
 _PHASE_TIMEOUT_SECONDS = 1.0
 _STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
@@ -272,6 +274,28 @@ def _enqueue_timing(payload: dict[str, Any], *, final: bool = False) -> None:
             )
 
 
+def _enqueue_metric_points(payload: dict[str, Any], *, final: bool = False) -> None:
+    """Enqueue mirrored scalars; ``final`` is the process-exit flush."""
+    if _REPORTER_DRAINING and not final:
+        return
+    url = _derive_url(_METRIC_POINTS_PATH)
+    if not url:
+        return
+    _ensure_worker(allow_during_drain=final)
+    item = {
+        "_url": url,
+        "_timeout": _STEP_EVENT_TIMEOUT_SECONDS,
+        "_retry_count": 3 if final else 1,
+        "_retry_delay": 1.0,
+        **payload,
+        "final": final,
+    }
+    try:  # the exit flush waits for room; the worker is still draining
+        _REPORT_QUEUE.put(item, block=final, timeout=_STEP_EVENT_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+
+
 def _requeue_timing_retry(payload: dict[str, Any], retries: int) -> None:
     if _REPORTER_DRAINING:
         return
@@ -298,9 +322,11 @@ def _schedule_timing_retry(payload: dict[str, Any], retries: int) -> None:
 
 
 def _is_final_timing(payload: dict[str, Any]) -> bool:
-    return bool(payload.get("final")) and str(payload.get("_url", "")).rstrip(
-        "/"
-    ).endswith("/api/timing-events")
+    """Process-exit flush whose delivery is worth retrying while draining."""
+    url = str(payload.get("_url", "")).rstrip("/")
+    return bool(payload.get("final")) and (
+        url.endswith("/api/timing-events") or url.endswith(_METRIC_POINTS_PATH)
+    )
 
 
 def _retry_timing_final_during_drain(payload: dict[str, Any], retries: int) -> bool:
@@ -504,6 +530,7 @@ def _compact_report_queue() -> None:
     with _REPORT_QUEUE.mutex:
         queued = list(_REPORT_QUEUE.queue)
         final_priority: list[dict[str, Any] | None] = []
+        metrics_by_run: dict[str, dict[str, Any]] = {}
         status_priority: list[dict[str, Any] | None] = []
         remaining: list[dict[str, Any] | None] = []
         discarded = 0
@@ -512,16 +539,41 @@ def _compact_report_queue() -> None:
                 remaining.append(item)
                 continue
             url = str(item.get("_url", "")).rstrip("/")
-            is_timing = url.endswith("/api/timing-events")
-            if is_timing and not item.get("final", False):
+            if url.endswith(_METRIC_POINTS_PATH):
+                # Fold the run's queued batches into one, in arrival order, so
+                # the drain deadline can't strand the final values behind a backlog.
+                merged = metrics_by_run.setdefault(
+                    str(item.get("training_run_id")), {**item, "points": {}}
+                )
+                for point in item.get("points", []):
+                    merged["points"].setdefault(point["step"], {}).update(
+                        point["metrics"]
+                    )
+                merged["final"] = merged.get("final", False) or item.get("final", False)
+                merged["_retry_count"] = max(
+                    merged.get("_retry_count", 0), item.get("_retry_count", 0)
+                )
                 discarded += 1
-                continue
-            if is_timing and item.get("final", False):
+            elif _is_final_timing(item):
                 final_priority.append(item)
-            elif is_timing or url.endswith("/api/framework-status"):
+            elif url.endswith("/api/timing-events"):
+                discarded += 1
+            elif url.endswith("/api/framework-status"):
                 status_priority.append(item)
             else:
                 remaining.append(item)
+        for merged in metrics_by_run.values():
+            points = [
+                {"step": step, "metrics": metrics}
+                for step, metrics in sorted(merged["points"].items())
+            ]
+            chunks = [
+                points[i : i + MAX_METRIC_POINTS_PER_BATCH]
+                for i in range(0, len(points), MAX_METRIC_POINTS_PER_BATCH)
+            ] or [[]]
+            for chunk in chunks:
+                final_priority.append({**merged, "points": chunk})
+                discarded -= 1
         _REPORT_QUEUE.queue.clear()
         _REPORT_QUEUE.queue.extend(final_priority)
         _REPORT_QUEUE.queue.extend(status_priority)
