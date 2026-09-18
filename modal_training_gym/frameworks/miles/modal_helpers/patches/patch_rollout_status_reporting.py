@@ -33,8 +33,10 @@ _LINE_INJECTIONS: list[tuple[str, str, str, re.Pattern[str]]] = [
         "initialize_rollouts",
         "None",
         re.compile(
-            r"^(?P<indent>[ \t]*)(?P<line>rollout_manager, num_rollout_per_epoch = "
-            r"create_rollout_manager\(args, pgs\[\"rollout\"\]\))[ \t]*$",
+            r"^(?P<indent>[ \t]*)(?P<line>(?:rollout_manager, num_rollout_per_epoch = "
+            r"create_rollout_manager\(args, pgs\[\"rollout\"\]\)|"
+            r"inference_controller, rollout_executor, num_rollout_per_epoch = "
+            r"await create_rollout_components\(args\)))[ \t]*$",
             re.M,
         ),
     ),
@@ -43,8 +45,9 @@ _LINE_INJECTIONS: list[tuple[str, str, str, re.Pattern[str]]] = [
         "generate_rollouts",
         "rollout_id",
         re.compile(
-            r"^(?P<indent>[ \t]*)(?P<line>rollout_data\w* = await "
-            r"rollout_manager\.generate\.remote\(rollout_id\))[ \t]*$",
+            r"^(?P<indent>[ \t]*)(?P<line>(?:rollout_data\w* = await "
+            r"rollout_manager\.generate\.remote\(rollout_id\)|"
+            r"await inference_controller\.prepare_rollout\(rollout_id\)))[ \t]*$",
             re.M,
         ),
     ),
@@ -65,7 +68,7 @@ _LINE_INJECTIONS: list[tuple[str, str, str, re.Pattern[str]]] = [
         "offload_rollout",
         "rollout_id",
         re.compile(
-            r"^(?P<indent>[ \t]*)(?P<line>await rollout_manager\.offload\.remote\("
+            r"^(?P<indent>[ \t]*)(?P<line>await (?:rollout_manager\.offload\.remote|inference_controller\.offload(?:_kv|_weights)?)\("
             r"[^\n]*\))[ \t]*$",
             re.M,
         ),
@@ -84,7 +87,7 @@ _LINE_INJECTIONS: list[tuple[str, str, str, re.Pattern[str]]] = [
         "weight_sync",
         "rollout_id",
         re.compile(
-            r"^(?P<indent>[ \t]*)(?P<line>await actor_model\.update_weights\("
+            r"^(?P<indent>[ \t]*)(?P<line>await (?:actor_model\.update_weights\(|update_weights\(actor_model, rollout_executor, )"
             r"rollout_id=rollout_id\))[ \t]*$",
             re.M,
         ),
@@ -116,6 +119,15 @@ def _patch_file(path: Path) -> None:
     for marker, phase, rollout_id_expr, pattern in _LINE_INJECTIONS:
         if marker in src:
             continue
+        if (
+            "create_rollout_components" in src
+            and phase == "offload_train"
+            and path.name == "train_async.py"
+        ):
+            pattern = re.compile(
+                r"^(?P<indent>[ \t]*)(?P<line>await (?:critic_model|actor_model)\.offload\(\))[ \t]*$",
+                re.M,
+            )
 
         def _replacement(match: re.Match[str]) -> str:
             indent = match.group("indent")
@@ -127,7 +139,9 @@ def _patch_file(path: Path) -> None:
             )
 
         src, count = pattern.subn(_replacement, src)
-        if count == 0:
+        if count == 0 and not (
+            path.name == "train_async.py" and phase == "offload_rollout"
+        ):
             failed.append(phase)
 
     if CHECKPOINT_SAVE_MARKER not in src:
