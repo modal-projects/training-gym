@@ -222,7 +222,7 @@ def run_download_phase(
 
 
 def write_dataset_if_needed(dataset: Any, path: str) -> bool:
-    """Write and validate a dataset unless its cached materialization exists."""
+    """Write trainer input unless a cached file already exists."""
     if os.path.exists(path):
         dataset.validate_written(path)
         return False

@@ -63,7 +63,7 @@ def _flags(args):
 @pytest.mark.parametrize("modality", ["image", "audio"])
 def test_multimodal_keys_emitted(modality):
     ds = _mm(modality)
-    assert ds.multimodal_keys == {modality: f"{modality}s"}
+    assert ds.modalities == frozenset({modality})
     if modality == "image":
         flags = _flags(Qwen3_VL_8B_Recipe().cli_args(dataset=ds, model=Qwen3_VL_8B()))
     else:
@@ -104,7 +104,7 @@ def test_text_dataset_unaffected():
         output_column="text",
         input_format="text",
     )
-    assert ds.multimodal_keys is None
+    assert ds.modalities == frozenset()
     assert "--multimodal-keys" not in Qwen3_4B_Recipe().cli_args(
         dataset=ds, model=Qwen3_4B()
     )
@@ -172,6 +172,16 @@ def test_hugging_face_rejects_unknown_input_format():
         )
 
 
+def test_custom_media_column_emitted():
+    ds = MultimodalDataset(
+        rows=[{"prompt": "p", "media": ["ref"], "label": "l"}],
+        modality="image",
+        media_column="pictures",
+    )
+    flags = _flags(Qwen3_VL_8B_Recipe().cli_args(dataset=ds, model=Qwen3_VL_8B()))
+    assert json.loads(flags["--multimodal-keys"]) == {"image": "pictures"}
+
+
 def test_media_column_must_be_distinct():
     with pytest.raises(TrainingGymConfigError, match="media_column"):
         MultimodalDataset(rows=[], modality="image", media_column="prompt")
@@ -184,7 +194,7 @@ def test_media_column_must_be_distinct():
 
 def test_train_config_rejects_unknown_multimodal_key():
     ds = _mm("image")
-    ds.multimodal_keys = {"pictures": "col"}
+    ds.modalities = frozenset({"pictures"})
     with pytest.raises(ValidationError, match=r"pictures.*allowed: audio, image"):
         TrainConfig(
             dataset=ds,
@@ -309,10 +319,12 @@ def test_yaml_raw_mode_overrides_bridge_field_for_conversion():
     assert recipe.ref_load == "/checkpoints/torch_dist/Qwen--Qwen3.5-4B-v31"
 
 
-def test_write_jsonl_materializes_data_uris(tmp_path):
+def test_write_writes_media_paths(tmp_path):
     png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     wav = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
     url = "https://example.com/img.png?" + ("a" * 8000)
+    local = tmp_path / "local.png"
+    local.write_bytes(b"\x89PNG\r\n\x1a\n")
     ds = MultimodalDataset(
         rows=[
             {
@@ -323,12 +335,17 @@ def test_write_jsonl_materializes_data_uris(tmp_path):
                     b"train-bytes",
                     "data:image/png,%89PNG%0D%0A%1A%0A",
                     url,
+                    local,
                 ],
                 "label": "l",
             }
         ],
         modality="image",
     )
+    raw = list(ds.rows())[0]["images"]
+    assert raw[0].startswith("data:image/png;base64,")
+    assert raw[2] == b"train-bytes"
+    assert raw[5] == local
     path = tmp_path / "train.jsonl"
     ds.write(str(path))
     row = json.loads(path.read_text().splitlines()[0])
@@ -340,6 +357,8 @@ def test_write_jsonl_materializes_data_uris(tmp_path):
     assert Path(images[2]).read_bytes() == b"train-bytes"
     assert Path(images[3]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert images[4] == url
+    assert images[5] == str((media_dir / "000005.png").resolve())
+    assert Path(images[5]).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
     audio = MultimodalDataset(
         rows=[{"prompt": "p", "media": [f"data:audio/wav;base64,{wav}"], "label": "l"}],
@@ -377,12 +396,29 @@ def test_train_config_validates_eval_dataset():
         modality="image",
         media_column="pictures",
     )
-    with pytest.raises(ValidationError, match="multimodal_keys"):
+    with pytest.raises(ValidationError, match="media columns"):
         TrainConfig(
             dataset=_mm("image"),
             model=Qwen3_VL_8B(),
             recipe=Qwen3_VL_8B_Recipe(),
             eval_dataset=eval_ds,
+        )
+
+
+def test_build_app_revalidates_mutated_eval_dataset():
+    cfg = TrainConfig(
+        dataset=_mm("image"),
+        model=Qwen3_VL_8B(),
+        recipe=Qwen3_VL_8B_Recipe(),
+    )
+    cfg.eval_dataset = _mm("audio")
+    with pytest.raises(TrainingGymConfigError, match="media columns"):
+        build_slime_app(
+            training_run_id="mutated-eval",
+            slime=cfg.recipe,
+            model=cfg.model,
+            dataset=cfg.dataset,
+            eval_dataset=cfg.eval_dataset,
         )
 
 

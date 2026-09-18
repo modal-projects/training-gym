@@ -13,17 +13,22 @@ _ALLOWED_MODALITIES = frozenset({"image", "audio"})
 
 
 def requested_modalities(dataset: DatasetConfig) -> frozenset[str]:
-    keys = dataset.multimodal_keys
-    if not keys:
-        return frozenset()
-    unknown = sorted(key for key in keys if key not in _ALLOWED_MODALITIES)
+    requested = frozenset(dataset.modalities)
+    unknown = sorted(name for name in requested if name not in _ALLOWED_MODALITIES)
     if unknown:
         allowed = ", ".join(sorted(_ALLOWED_MODALITIES))
-        bad = ", ".join(repr(key) for key in unknown)
-        raise TrainingGymConfigError(
-            f"unknown multimodal_keys key {bad}; allowed: {allowed}"
-        )
-    return frozenset(keys)
+        bad = ", ".join(repr(name) for name in unknown)
+        raise TrainingGymConfigError(f"unknown modality {bad}; allowed: {allowed}")
+    return requested
+
+
+def multimodal_key_map(dataset: DatasetConfig) -> dict[str, str] | None:
+    requested = requested_modalities(dataset)
+    if not requested:
+        return None
+    if dataset.media_column and len(requested) == 1:
+        return {next(iter(requested)): dataset.media_column}
+    return {name: f"{name}s" for name in requested}
 
 
 def validate_modalities(

@@ -61,9 +61,9 @@ def test_media_rows_train_on_the_modality_dataset(config):
         config.framework, config.model_config(), 1, config.modality
     )
     if config.modality == "image":
-        assert dataset.multimodal_keys == {"image": "images"}
+        assert dataset.modalities == frozenset({"image"})
         return
-    assert dataset.multimodal_keys == {"audio": "audios"}
+    assert dataset.modalities == frozenset({"audio"})
 
 
 def test_registry_names_are_unique():

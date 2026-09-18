@@ -8,7 +8,7 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.metrics import MetricConfig
-from modal_training_gym.common.modality import requested_modalities
+from modal_training_gym.common.modality import multimodal_key_map, requested_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
     # Re-exported for backwards compatibility (e.g. frameworks/miles/launcher.py
@@ -727,8 +727,9 @@ class MilesRecipe(BaseTrainRecipe):
             dataset_path=dataset_path,
             eval_dataset_path=eval_dataset_path,
         )
-        if getattr(ds, "multimodal_keys", None):
-            fields["multimodal_keys"] = ds.multimodal_keys
+        keys = multimodal_key_map(ds)
+        if keys:
+            fields["multimodal_keys"] = keys
         return fields
 
     @staticmethod

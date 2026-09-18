@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import mimetypes
 import random
 import shutil
 import tomllib
@@ -25,20 +26,11 @@ from modal_training_gym.common.errors import TrainingGymConfigError
 DatasetRow = dict[str, Any]
 
 _DATA_URI_PREFIX = "data:"
-_MIME_EXT = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/webp": "webp",
-    "image/gif": "gif",
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/wave": "wav",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/mp4": "m4a",
-    "audio/ogg": "ogg",
-    "audio/flac": "flac",
+_MIME_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "audio/mp3": "audio/mpeg",
+    "audio/wav": "audio/x-wav",
+    "audio/wave": "audio/x-wav",
 }
 
 
@@ -55,12 +47,15 @@ def _materialize_data_uri(uri: str, dest_dir: Path, index: int) -> str:
     else:
         raw = unquote_to_bytes(payload)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    path = dest_dir / f"{index:06d}.{_MIME_EXT.get(mime, 'bin')}"
+    ext = mimetypes.guess_extension(_MIME_ALIASES.get(mime, mime)) or ".bin"
+    path = dest_dir / f"{index:06d}.{ext.lstrip('.')}"
     path.write_bytes(raw)
     return str(path.resolve())
 
 
-def _as_media_path(item: Any, dest_dir: Path, index: int) -> Any:
+def _as_media_path(item, dest_dir: Path, index: int):
+    if isinstance(item, Path):
+        item = str(item)
     if isinstance(item, (bytes, bytearray)):
         dest_dir.mkdir(parents=True, exist_ok=True)
         path = dest_dir / f"{index:06d}.bin"
@@ -98,10 +93,11 @@ class DatasetType(Enum):
 
 
 class DatasetConfig(ABC):
-    """Dataset fields and materialization behavior shared across training frameworks."""
+    """Dataset fields and on-disk serialization shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
-    multimodal_keys: dict[str, str] | None = None
+    modalities: frozenset[str] = frozenset()
+    media_column: str | None = None
 
     def cache_key(self) -> str | None:
         return None
@@ -134,7 +130,10 @@ class DatasetConfig(ABC):
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
-        """Materialize training data at ``path``."""
+        """Disk hook: write ``rows()`` as JSONL at ``path``.
+
+        Column names and values match ``rows()``. Values must be JSON-serializable.
+        """
         with open(path, "w") as f:
             for row in self.rows():
                 f.write(json.dumps(row) + "\n")
@@ -145,8 +144,8 @@ class DatasetConfig(ABC):
             cols.add(self.input_key())
         if self.label_key():
             cols.add(self.label_key())
-        if self.multimodal_keys:
-            cols.update(self.multimodal_keys.values())
+        if self.media_column:
+            cols.add(self.media_column)
         return cols
 
     def validate_written(self, path: str) -> None:
@@ -154,9 +153,7 @@ class DatasetConfig(ABC):
         import os
 
         if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"{type(self).__name__}.write() did not produce {path!r}. "
-            )
+            raise FileNotFoundError(f"{type(self).__name__} did not produce {path!r}.")
 
         expected = self._expected_columns()
         if not expected:
@@ -185,11 +182,11 @@ class DatasetConfig(ABC):
         missing = expected - cols
         if missing:
             raise TrainingGymConfigError(
-                f"{type(self).__name__}.write() wrote {path!r} but it is "
+                f"{type(self).__name__} wrote {path!r} but it is "
                 f"missing required column(s) {sorted(missing)} "
                 f"(input_key={self.input_key()!r}, label_key={self.label_key()!r}). "
                 f"Columns present: {sorted(cols)}. "
-                "Either rename the column(s) your write() writes, or implement "
+                "Either rename the column(s) on disk, or implement "
                 "input_key()/label_key() on your DatasetConfig subclass to match."
             )
 
@@ -665,11 +662,9 @@ class HarborDataset(DatasetConfig):
 
 
 class MultimodalDataset(DatasetConfig):
-    """Dataset of text prompts paired with image or audio media.
+    """Text prompts paired with image or audio.
 
-    Paths are resolved inside the dataset-preparation container and are not
-    uploaded from the launching machine; to ship local files, provide bytes or
-    data URIs.
+    See [the dataset guide](https://gym.modal.dev/guides/dataset/multimodal) for more information.
     """
 
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
@@ -699,7 +694,7 @@ class MultimodalDataset(DatasetConfig):
             raise TrainingGymConfigError(
                 "media_column must differ from input_key and label_key"
             )
-        self.multimodal_keys = {modality: self.media_column}
+        self.modalities = frozenset({modality})
         self._source_rows = list(rows or [])
 
     def input_key(self) -> str:
@@ -743,6 +738,10 @@ class MultimodalDataset(DatasetConfig):
         return out
 
     def write(self, path: str) -> None:
+        """Disk hook: rewrite media to trainer paths.
+
+        ``rows()`` keeps constructor media.
+        """
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         rows = self._rows_with_paths(

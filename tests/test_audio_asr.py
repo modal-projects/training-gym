@@ -75,13 +75,26 @@ def test_prompt_user_text_ignores_non_user_roles():
 
 
 def test_audio_ref_extracts_path():
-    assert _audio_ref(types.SimpleNamespace(prompt=_audio_prompt())) == _AUDIO_PATH
+    missing = "/definitely-not-a-training-gym-audio.wav"
+    assert (
+        _audio_ref(types.SimpleNamespace(prompt=_audio_prompt(audio=missing)))
+        == missing
+    )
+
+
+def test_audio_ref_promotes_existing_path(tmp_path):
+    wav = tmp_path / "clip.wav"
+    wav.write_bytes(b"RIFF")
+    sample = types.SimpleNamespace(prompt=_audio_prompt(audio=str(wav)))
+    assert _audio_ref(sample) == wav
+    assert coerce_audio_to_bytes(_audio_ref(sample)) == b"RIFF"
 
 
 def test_coerce_audio_reads_path(tmp_path):
     wav = tmp_path / "clip.wav"
     wav.write_bytes(b"RIFF")
-    assert coerce_audio_to_bytes(str(wav)) == b"RIFF"
+    assert coerce_audio_to_bytes(wav) == b"RIFF"
+    assert coerce_audio_to_bytes(str(wav)) is None
     assert coerce_audio_to_bytes(b"raw") == b"raw"
     url = "https://example.com/clip.wav?" + ("x" * 8000)
     assert coerce_audio_to_bytes(url) is None

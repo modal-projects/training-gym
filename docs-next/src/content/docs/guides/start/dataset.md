@@ -104,6 +104,85 @@ hello_dataset = HarborDataset(
 )
 ```
 
+## Multimodal
+
+A [MultimodalDataset](https://gym.modal.dev/reference/multimodaldataset) allows you to train on image or audio data.
+
+```python
+from modal_training_gym import MultimodalDataset
+
+dataset = MultimodalDataset(
+    rows=[
+        {
+            "prompt": "What is in this image?",
+            "media": ["/data/cat.png"], # or bytes, data URI, HTTPS URL
+            "label": "a cat",
+        }
+    ],
+    modality="image",
+)
+```
+
+Some useful methods:
+
+Iterate through the dataset with `rows()`:
+
+```python
+next(iter(dataset.rows()))
+# {"prompt": "What is in this image?", "images": ["/data/cat.png"], "label": "a cat"}
+
+audio_dataset = MultimodalDataset(
+    rows=[{"prompt": "Transcribe this.", "media": ["/data/meow.wav"], "label": "a meow"}],
+    modality="audio",
+)
+next(iter(audio_dataset.rows()))
+# {"prompt": "Transcribe this.", "audios": ["/data/meow.wav"], "label": "a meow"}
+```
+
+Note that the default media column is `images` or `audios`. `media_column` overrides the default:
+
+```python
+dataset = MultimodalDataset(
+    rows=[{"prompt": "What is in this image?", "media": ["/data/cat.png"], "label": "a cat"}],
+    modality="image",
+    media_column="pictures",
+)
+next(iter(dataset.rows()))
+# {"prompt": "What is in this image?", "pictures": ["/data/cat.png"], "label": "a cat"}
+```
+
+`write()` rewrites media to paths for training:
+
+```python
+MultimodalDataset(
+    rows=[{"prompt": "What is in this image?", "media": [b"..."], "label": "a cat"}],
+    modality="image",
+).write("/data/train.jsonl")
+# {"prompt": "What is in this image?", "images": ["/data/train.jsonl.media/000000.bin"], "label": "a cat"}
+```
+
+A subclass that loads rows dynamically implements `source_rows()` instead of `rows()`:
+
+```python
+examples = [(image_path, answer), ...]
+
+
+class ImageQuestions(MultimodalDataset):
+    def __init__(self):
+        super().__init__(modality="image")
+
+    def source_rows(self):
+        for image_path, answer in examples:
+            yield {
+                "prompt": "Describe this image.",
+                "media": image_path,
+                "label": answer,
+            }
+
+
+dataset = ImageQuestions()
+```
+
 ## Creating a custom dataset
 
 To use your own data, likely stored in an [external source](https://modal.com/docs/guide/cloud-bucket-mounts) or a [Modal Volume](https://modal.com/docs/guide/volumes), you simply subclass [DatasetConfig](https://gym.modal.dev/reference/datasetconfig):

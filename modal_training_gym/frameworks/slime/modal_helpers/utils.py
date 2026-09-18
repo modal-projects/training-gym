@@ -4,7 +4,6 @@ Shared implementations live in :mod:`modal_training_gym.common.launcher_utils`;
 this module keeps slime's parametrization and the historical import path.
 """
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +14,6 @@ from modal_training_gym.common.launcher_utils import (
     prepare_launch_config as _prepare_launch_config,
     resolve_checkpoint_ref as resolve_checkpoint_ref,
 )
-from modal_training_gym.common.modality import requested_modalities
-from modal_training_gym.common.models.base import QWEN3_5_VL_PROVIDER
 from modal_training_gym.common.patches import encode_patch
 
 SLIME_ROOT = "/root/slime"
@@ -40,14 +37,6 @@ def _with_qwen35_vl_plugin(image: Any) -> Any:
         )
     patch_b64 = encode_patch("patch_qwen3_5_hf_to_megatron", plugin)
     return image.run_commands(f"echo {patch_b64} | base64 -d | python3")
-
-
-def qwen35_vl_plugin(model, dataset) -> Callable[[Any], Any] | None:
-    if model is None or model.custom_model_provider != QWEN3_5_VL_PROVIDER:
-        return None
-    if dataset is None or "image" not in requested_modalities(dataset):
-        return None
-    return _with_qwen35_vl_plugin
 
 
 def get_checkpoint_conversion_policy(

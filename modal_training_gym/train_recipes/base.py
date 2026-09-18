@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.modality import multimodal_key_map
 from modal_training_gym.train_recipes.gpu_allocation import (
     GpuAllocation,
     resolve_gpu_allocation,
@@ -166,12 +167,12 @@ class BaseTrainRecipe(ABC):
                     f"Training and evaluation datasets must use the same "
                     f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
-        train_keys = ds.multimodal_keys
-        eval_keys = eval_ds.multimodal_keys
+        train_keys = multimodal_key_map(ds)
+        eval_keys = multimodal_key_map(eval_ds)
         if train_keys != eval_keys:
             raise TrainingGymConfigError(
                 f"Training and evaluation datasets must use the same "
-                f"multimodal_keys: got {train_keys!r} and {eval_keys!r}."
+                f"media columns: got {train_keys!r} and {eval_keys!r}."
             )
 
     @classmethod

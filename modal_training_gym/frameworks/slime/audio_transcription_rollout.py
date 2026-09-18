@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from pathlib import Path
 from typing import Any  # slime's runtime arg/Sample objects have no public type
 
 from modal_training_gym.common.audio import coerce_audio_to_bytes
@@ -56,6 +57,15 @@ def _audio_ref(sample: Any) -> Any:
     for item in _iter_content_items(getattr(sample, "prompt", None)):
         if isinstance(item, dict) and (item.get("type") == "audio" or "audio" in item):
             ref = item.get("audio") or item.get("audio_url")
+            if isinstance(ref, str) and not ref.startswith(
+                ("data:", "http://", "https://")
+            ):
+                path = Path(ref)
+                try:
+                    if path.is_file():
+                        return path
+                except OSError:
+                    pass
             if ref:
                 return ref
     raise RuntimeError(

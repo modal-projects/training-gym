@@ -33,7 +33,8 @@ from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
 from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
-from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.modality import requested_modalities, validate_modalities
+from modal_training_gym.common.models import ModelConfig, QWEN3_5_VL_PROVIDER
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.ray_cluster import (
     ModalRayCluster,
@@ -92,11 +93,11 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import (
 )
 from .modal_helpers.utils import (
     SLIME_ROOT,
+    _with_qwen35_vl_plugin,
     build_train_cmd,
     get_checkpoint_conversion_policy,
     get_modal_cluster_context,
     prepare_slime_config,
-    qwen35_vl_plugin,
     resolve_checkpoint_ref,
 )
 from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
@@ -396,6 +397,10 @@ def build_slime_app(
     volume_prefix = f"slime-{type(slime).__name__.lstrip('_').lower()}"
 
     SlimeRecipe._validate_custom_model_architecture(model)
+    SlimeRecipe._validate_datasets(dataset, eval_dataset)
+    validate_modalities(slime, model, dataset)
+    if eval_dataset is not None:
+        validate_modalities(slime, model, eval_dataset)
     dataset_path = SlimeRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
         SlimeRecipe._resolve_data_paths(eval_dataset)
@@ -474,9 +479,13 @@ def build_slime_app(
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)
-    apply_plugin = qwen35_vl_plugin(model, dataset)
-    if apply_plugin is not None:
-        image = apply_plugin(image)
+    if (
+        model is not None
+        and model.custom_model_provider == QWEN3_5_VL_PROVIDER
+        and dataset is not None
+        and "image" in requested_modalities(dataset)
+    ):
+        image = _with_qwen35_vl_plugin(image)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
