@@ -43,6 +43,7 @@ _PHASE_PATH = "/api/framework-status"
 _ROLLOUT_PATH = "/api/training-rollouts"
 _ADVANTAGE_PATH = "/api/advantage-distributions"
 _METRIC_POINTS_PATH = "/api/metric-points"
+MAX_METRIC_POINTS_PER_BATCH = 5000
 _PHASE_TIMEOUT_SECONDS = 1.0
 _STEP_EVENT_TIMEOUT_SECONDS = 5.0
 _ROLLOUT_TIMEOUT_SECONDS = 10.0
@@ -562,12 +563,18 @@ def _compact_report_queue() -> None:
             else:
                 remaining.append(item)
         for merged in metrics_by_run.values():
-            merged["points"] = [
+            points = [
                 {"step": step, "metrics": metrics}
                 for step, metrics in sorted(merged["points"].items())
             ]
-            final_priority.append(merged)
-            discarded -= 1
+            chunks = [
+                points[i : i + MAX_METRIC_POINTS_PER_BATCH]
+                for i in range(0, len(points), MAX_METRIC_POINTS_PER_BATCH)
+            ] or [[]]
+            for chunk in chunks:
+                final_priority.append({**merged, "points": chunk, "final": False})
+                discarded -= 1
+            final_priority[-1]["final"] = merged["final"]
         _REPORT_QUEUE.queue.clear()
         _REPORT_QUEUE.queue.extend(final_priority)
         _REPORT_QUEUE.queue.extend(status_priority)

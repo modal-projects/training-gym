@@ -16,10 +16,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from modal_training_gym.common.reporting import MAX_METRIC_POINTS_PER_BATCH
 from modal_training_gym.utils.metadata import MetadataStore
 
 CHUNK_STEPS = 1000
-MAX_POINTS_PER_BATCH = 5000
+MAX_POINTS_PER_BATCH = MAX_METRIC_POINTS_PER_BATCH
 MAX_POINTS_PER_KEY = 1000  # per key per response; W&B samples similarly
 
 StepTable = dict[int, dict[str, float]]

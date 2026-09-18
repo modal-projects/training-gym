@@ -205,6 +205,29 @@ def test_drain_compaction_folds_metric_batches_into_one_prioritized_post():
         queue.get_nowait()
 
 
+def test_drain_compaction_splits_merged_metrics_at_the_batch_limit(monkeypatch):
+    monkeypatch.setattr(reporting, "MAX_METRIC_POINTS_PER_BATCH", 2)
+    queue = reporting._REPORT_QUEUE
+    while not queue.empty():
+        queue.get_nowait()
+    for steps in ((0, 1, 2), (3, 4)):
+        queue.put_nowait(
+            {
+                "_url": "https://dash.test/api/metric-points",
+                "training_run_id": "r",
+                "points": [{"step": s, "metrics": {"a": 1.0}} for s in steps],
+                "final": steps == (3, 4),
+                "_retry_count": 1,
+            }
+        )
+    reporting._compact_report_queue()
+    batches = list(queue.queue)
+    assert [[p["step"] for p in b["points"]] for b in batches] == [[0, 1], [2, 3], [4]]
+    assert [b["final"] for b in batches] == [False, False, True]
+    while not queue.empty():
+        queue.get_nowait()
+
+
 # ── config wiring ─────
 
 
