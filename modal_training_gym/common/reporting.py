@@ -529,6 +529,7 @@ def _compact_report_queue() -> None:
     with _REPORT_QUEUE.mutex:
         queued = list(_REPORT_QUEUE.queue)
         final_priority: list[dict[str, Any] | None] = []
+        metrics_by_run: dict[str, dict[str, Any]] = {}
         status_priority: list[dict[str, Any] | None] = []
         remaining: list[dict[str, Any] | None] = []
         discarded = 0
@@ -537,17 +538,36 @@ def _compact_report_queue() -> None:
                 remaining.append(item)
                 continue
             url = str(item.get("_url", "")).rstrip("/")
-            # Every metric batch moves up together: they overwrite by (step,
-            # key) in arrival order, so reordering them would resurrect stale values.
-            if _is_final_timing(item) or url.endswith(_METRIC_POINTS_PATH):
+            if url.endswith(_METRIC_POINTS_PATH):
+                # Fold the run's queued batches into one, in arrival order, so
+                # the drain deadline can't strand the final values behind a backlog.
+                merged = metrics_by_run.setdefault(
+                    str(item.get("training_run_id")), {**item, "points": {}}
+                )
+                for point in item.get("points", []):
+                    merged["points"].setdefault(point["step"], {}).update(
+                        point["metrics"]
+                    )
+                merged["final"] = merged.get("final", False) or item.get("final", False)
+                merged["_retry_count"] = max(
+                    merged.get("_retry_count", 0), item.get("_retry_count", 0)
+                )
+                discarded += 1
+            elif _is_final_timing(item):
                 final_priority.append(item)
             elif url.endswith("/api/timing-events"):
                 discarded += 1
-                continue
             elif url.endswith("/api/framework-status"):
                 status_priority.append(item)
             else:
                 remaining.append(item)
+        for merged in metrics_by_run.values():
+            merged["points"] = [
+                {"step": step, "metrics": metrics}
+                for step, metrics in sorted(merged["points"].items())
+            ]
+            final_priority.append(merged)
+            discarded -= 1
         _REPORT_QUEUE.queue.clear()
         _REPORT_QUEUE.queue.extend(final_priority)
         _REPORT_QUEUE.queue.extend(status_priority)

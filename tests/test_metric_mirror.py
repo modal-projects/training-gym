@@ -167,21 +167,40 @@ def test_enqueue_metric_points_derives_url_and_retries(monkeypatch):
     assert len(items) == 3
 
 
-def test_drain_compaction_moves_metric_batches_to_the_front_in_order(monkeypatch):
+def test_drain_compaction_folds_metric_batches_into_one_prioritized_post():
     metrics_url = "https://dash.test/api/metric-points"
+    timing_url = "https://dash.test/api/timing-events"
     queue = reporting._REPORT_QUEUE
     while not queue.empty():
         queue.get_nowait()
     for item in (
         {"_url": "https://dash.test/api/training-rollouts", "n": 1},
-        {"_url": metrics_url, "final": False, "n": 2},  # older value of a step…
-        {"_url": "https://dash.test/api/timing-events", "final": False},
+        {
+            "_url": metrics_url,
+            "training_run_id": "r",
+            "points": [{"step": 10, "metrics": {"loss": 0.8, "lr": 1.0}}],
+            "final": False,
+            "_retry_count": 1,
+        },
+        {"_url": timing_url, "final": False},
         {"_url": "https://dash.test/api/framework-status", "n": 3},
-        {"_url": metrics_url, "final": True, "n": 4},  # …must still land before this
+        {"_url": timing_url, "final": True, "n": 4},
+        {
+            "_url": metrics_url,
+            "training_run_id": "r",
+            "points": [{"step": 10, "metrics": {"loss": 0.7}}],
+            "final": True,
+            "_retry_count": 3,
+        },
     ):
         queue.put_nowait(item)
+    queue.unfinished_tasks = 6
     reporting._compact_report_queue()
-    assert [item["n"] for item in queue.queue] == [2, 4, 3, 1]
+    final_timing, metrics, status, rollouts = queue.queue
+    assert final_timing["n"] == 4 and status["n"] == 3 and rollouts["n"] == 1
+    assert metrics["points"] == [{"step": 10, "metrics": {"loss": 0.7, "lr": 1.0}}]
+    assert metrics["final"] is True and metrics["_retry_count"] == 3
+    assert queue.unfinished_tasks == 4
     while not queue.empty():
         queue.get_nowait()
 
