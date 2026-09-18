@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://gym.modal.dev/sitemap-index.xml
