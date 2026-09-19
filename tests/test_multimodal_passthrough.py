@@ -461,11 +461,17 @@ def test_write_writes_media_paths(tmp_path):
 
 def test_write_rejects_malformed_base64_data_uri(tmp_path):
     ds = MultimodalDataset(
-        rows=[{"prompt": "p", "media": ["data:image/png;base64,AAAA!"], "label": "l"}],
+        rows=[
+            {"prompt": "ok", "media": [b"bytes"], "label": "l"},
+            {"prompt": "bad", "media": ["data:image/png;base64,AAAA!"], "label": "l"},
+        ],
         modality="image",
     )
+    path = tmp_path / "train.jsonl"
     with pytest.raises(TrainingGymConfigError, match="invalid base64"):
-        ds.write(str(tmp_path / "train.jsonl"))
+        ds.write(str(path))
+    assert not path.exists()
+    assert not path.with_name("train.jsonl.tmp").exists()
 
 
 def test_write_rejects_remote_media_urls(tmp_path):

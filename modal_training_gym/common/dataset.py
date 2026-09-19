@@ -750,9 +750,15 @@ class MultimodalDataset(DatasetConfig):
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         rows = self._rows_with_paths(self.rows(), dest.with_name(dest.name + ".media"))
-        with dest.open("w") as f:
-            for row in rows:
-                f.write(json.dumps(row) + "\n")
+        tmp = dest.with_name(dest.name + ".tmp")
+        try:
+            with tmp.open("w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.replace(dest)
 
 
 class OnlineRollout(DatasetConfig):
