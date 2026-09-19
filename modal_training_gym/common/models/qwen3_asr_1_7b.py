@@ -40,6 +40,7 @@ class Qwen3_ASR_1_7B(HFModelConfiguration):
 
     requires_bshd = True
     audio_placeholder = "<|audio_start|><|audio_pad|><|audio_end|>"
+    supported_modalities = frozenset({"audio"})
 
     # thinker_config.text_config (Qwen3 dense backbone), verbatim from config.json.
     architecture = ModelArchitecture(

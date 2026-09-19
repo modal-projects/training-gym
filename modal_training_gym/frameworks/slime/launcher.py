@@ -33,7 +33,8 @@ from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
 from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
-from modal_training_gym.common.models import ModelConfig
+from modal_training_gym.common.modality import requested_modalities, validate_modalities
+from modal_training_gym.common.models import ModelConfig, QWEN3_5_VL_PROVIDER
 from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.ray_cluster import (
     ModalRayCluster,
@@ -91,6 +92,8 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import (
     SlimeRecipe,
 )
 from .modal_helpers.utils import (
+    SLIME_ROOT,
+    _with_qwen35_vl_plugin,
     build_train_cmd,
     get_checkpoint_conversion_policy,
     get_modal_cluster_context,
@@ -118,7 +121,6 @@ def _validate_resume_checkpoint(
         )
 
 
-SLIME_ROOT = "/root/slime"
 # Pin by digest to prevent mutable-tag drift.  Tag: nightly-dev-20260722a
 SLIME_IMAGE = "slimerl/slime@sha256:a97ec147e37bef050337a9b229036eda00b4aa9c4d02b31a0109dc850f8ca342"
 # v0.8.0+ makes per-task CPU/memory requests configurable via enforcement
@@ -396,6 +398,9 @@ def build_slime_app(
 
     SlimeRecipe._validate_custom_model_architecture(model)
     SlimeRecipe._validate_datasets(dataset, eval_dataset)
+    validate_modalities(slime, model, dataset)
+    if eval_dataset is not None:
+        validate_modalities(slime, model, eval_dataset)
     dataset_path = SlimeRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
         SlimeRecipe._resolve_data_paths(eval_dataset)
@@ -417,16 +422,18 @@ def build_slime_app(
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
 
-    if (
-        model
-        and getattr(slime, "megatron_to_hf_mode", "") != "bridge"
-        and not slime.ref_load
-    ):
+    megatron_to_hf_mode = slime.effective_megatron_to_hf_mode(dataset, model)
+
+    if model and megatron_to_hf_mode != "bridge" and not slime.ref_load:
         # Non-bridge: pre-convert HF -> torch_dist (convert_checkpoint) and load that as the
         # reference checkpoint. In bridge mode we instead load the HF weights directly via
         # AutoBridge; ref_load is set to the local HF snapshot dir at train time.
         slug = model.model_name.replace("/", "--")
-        object.__setattr__(slime, "ref_load", f"/checkpoints/torch_dist/{slug}-v31")
+        object.__setattr__(
+            slime,
+            "ref_load",
+            slime.torch_dist_ref_load or f"/checkpoints/torch_dist/{slug}-v31",
+        )
 
     # ── GDN compatibility ─────────────────────────────────────────────────
     # Models with Gated Delta Net (GDN) layers (use_gated_attention=True)
@@ -476,6 +483,13 @@ def build_slime_app(
         image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
 
     image = _overlay_slime_source(image, slime)
+    if (
+        model is not None
+        and model.custom_model_provider == QWEN3_5_VL_PROVIDER
+        and dataset is not None
+        and "image" in requested_modalities(dataset)
+    ):
+        image = _with_qwen35_vl_plugin(image)
 
     if slime.image_run_commands:
         image = image.run_commands(*slime.image_run_commands)
@@ -627,7 +641,7 @@ def build_slime_app(
         train_image = train_image.run_commands(
             f"echo {_PATCH_GDN_PACKED_SEQ_B64} | base64 -d | python3",
         )
-    if slime.megatron_to_hf_mode == "bridge":
+    if megatron_to_hf_mode == "bridge":
         train_image = train_image.run_commands(
             f"echo {_PATCH_BRIDGE_PER_TOKEN_LOSS_B64} | base64 -d | python3",
         )
@@ -747,7 +761,7 @@ def build_slime_app(
             )
 
         # Bridge mode loads HF weights directly into Megatron at train time.
-        if getattr(slime, "megatron_to_hf_mode", None) == "bridge":
+        if megatron_to_hf_mode == "bridge":
             print(
                 "Bridge mode — HF weights loaded directly via AutoBridge; no conversion needed."
             )
@@ -1131,7 +1145,7 @@ def build_slime_app(
 
             # Resolve the local HF snapshot dir (used for bridge-mode load below).
             _hf_ref: str | None = None
-            if model and (slime.megatron_to_hf_mode == "bridge" or slime.ref_load):
+            if model and (megatron_to_hf_mode == "bridge" or slime.ref_load):
                 from huggingface_hub import snapshot_download as _snap0
 
                 _hf_ref = (
@@ -1167,14 +1181,13 @@ def build_slime_app(
                         "WARNING: no_save_optim=True — enabling no_load_optim for resume."
                     )
                 object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
-            elif (
-                slime.megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref
-            ):
+            elif megatron_to_hf_mode == "bridge" and _hf_ref and slime.ref_load is None:
                 # Fresh bridge run: load the HF weights directly via AutoBridge. slime falls back
                 # args.load -> args.ref_load, and _load_checkpoint_hf maps the HF dir into Megatron
                 # (weights only — no optimizer/RNG state, so no torch_dist is required). Pointing
                 # ref_load at a torch_dist here would instead trigger the full-resume path and fail
-                # on the missing optimizer state.
+                # on the missing optimizer state, so only an unset ref_load is filled in and a
+                # caller value is kept.
                 object.__setattr__(slime, "ref_load", _hf_ref)
             try:
                 cmd = build_train_cmd(

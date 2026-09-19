@@ -1,8 +1,13 @@
 import json
+from pathlib import Path
 
 import pytest
 
-from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.dataset import (
+    DatasetConfig,
+    HarborDataset,
+    MultimodalDataset,
+)
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.launcher_helpers import (
     run_prepare_dataset,
@@ -96,6 +101,20 @@ def test_write_caller_creates_parent_directory(tmp_path):
     with pytest.raises(FileNotFoundError):
         dataset.write(path)
     assert write_dataset_if_needed(dataset, path)
+
+
+def test_write_dataset_if_needed_rewrites_multimodal_media(tmp_path):
+    dataset = MultimodalDataset(
+        rows=[{"prompt": "p", "media": [b"train-bytes"], "label": "l"}],
+        modality="image",
+    )
+    path = tmp_path / "nested" / "train.jsonl"
+    assert write_dataset_if_needed(dataset, str(path))
+    row = json.loads(path.read_text().splitlines()[0])
+    media = Path(row["images"][0])
+    assert media.read_bytes() == b"train-bytes"
+    assert media.parent == path.with_name(path.name + ".media")
+    assert list(dataset.rows())[0]["images"] == [b"train-bytes"]
 
 
 def test_run_prepare_dataset_writes_train_and_eval(tmp_path):

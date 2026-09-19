@@ -8,6 +8,7 @@ from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.common.modality import multimodal_key_map, requested_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
     # Re-exported for backwards compatibility (e.g. frameworks/miles/launcher.py
@@ -78,6 +79,7 @@ _MILES_SKIP = {
     "convert_ephemeral_disk_mb",
     "capture_trace",
     "trace_sample_limit",
+    "modality",
 }
 
 YAML_CONFIG_FIELDS = ("eval_config", "extra_config", "sglang_config")
@@ -228,6 +230,8 @@ class MilesRecipe(BaseTrainRecipe):
             Tool-call output parser.
         sglang_reasoning_parser:
             Parser for reasoning/thinking output.
+        sglang_enable_multimodal:
+            Enable SGLang multimodal inputs. ``None`` set to ``True`` if the dataset is multimodal.
 
         advantage_estimator:
             Advantage estimator.
@@ -446,6 +450,8 @@ class MilesRecipe(BaseTrainRecipe):
             become Miles arguments and override same-named fields.
         sglang_config:
             SGLang engine settings written to ``--sglang-config`` as YAML.
+        apply_chat_template:
+            Render prompts through the tokenizer chat template.
         apply_chat_template_kwargs:
             Keyword arguments for tokenizer ``apply_chat_template``, passed as JSON.
         train_env_vars:
@@ -534,6 +540,7 @@ class MilesRecipe(BaseTrainRecipe):
     sglang_server_concurrency: int | None = None
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
+    sglang_enable_multimodal: bool | None = None
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -672,9 +679,11 @@ class MilesRecipe(BaseTrainRecipe):
     # ── Config overrides ────────────────────────────────────────────────────
     extra_config: dict | None = None
     sglang_config: dict | str | None = None
+    apply_chat_template: bool | None = None
     apply_chat_template_kwargs: str | dict = ""
     train_env_vars: dict | str | None = None
     multimodal_keys: dict | str | None = None
+    modality: Literal["text", "vision", "audio"] = "text"
 
     # ── Validators ───────────────────────────────────────────────────────────
 
@@ -723,8 +732,9 @@ class MilesRecipe(BaseTrainRecipe):
             dataset_path=dataset_path,
             eval_dataset_path=eval_dataset_path,
         )
-        if getattr(ds, "multimodal_keys", None):
-            fields["multimodal_keys"] = ds.multimodal_keys
+        keys = multimodal_key_map(ds)
+        if keys:
+            fields["multimodal_keys"] = keys
         return fields
 
     @staticmethod
@@ -807,6 +817,26 @@ class MilesRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: ModelConfig) -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def active_modalities(self) -> frozenset[str]:
+        mapped = {"vision": "image", "audio": "audio"}.get(self.modality)
+        return frozenset({mapped} if mapped else ())
+
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: ModelConfig | None,
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if self.apply_chat_template is not None:
+            out["apply_chat_template"] = self.apply_chat_template
+        if (
+            self.sglang_enable_multimodal is None
+            and dataset is not None
+            and requested_modalities(dataset)
+        ):
+            out["sglang_enable_multimodal"] = True
+        return out
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -843,6 +873,7 @@ class MilesRecipe(BaseTrainRecipe):
                     eval_dataset_path=eval_dataset_path,
                 )
             )
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

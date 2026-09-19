@@ -1,9 +1,13 @@
 from collections.abc import Callable
 from dataclasses import field
 from pathlib import Path
+from typing import Any
 
 from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass
+
+from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.models import ModelConfig
 
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.frameworks.slime.audio_transcription_rollout import (
@@ -53,6 +57,16 @@ class Qwen3_ASR_1_7B_Recipe(SlimeRecipe):
         default_factory=lambda: {"qkv_format": "bshd", "micro_batch_size": 1}
     )
 
-    megatron_to_hf_mode: str = "bridge"
+    megatron_to_hf_mode: str | None = "bridge"
 
     image_run_commands: list[str] = field(default_factory=_asr_image_run_commands)
+
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: ModelConfig | None,
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if self.apply_chat_template is None:
+            out["apply_chat_template"] = False
+        return out

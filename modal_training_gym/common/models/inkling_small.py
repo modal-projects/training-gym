@@ -31,6 +31,7 @@ class Inkling_Small(HFModelConfiguration):
 
     model_name = "thinkingmachines/Inkling-Small"
     response_parser = staticmethod(parse_inkling_response)
+    supported_modalities = frozenset({"image", "audio"})
 
 
 class Inkling_Small_LoRA(Inkling_Small):

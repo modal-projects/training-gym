@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.modality import multimodal_key_map
 from modal_training_gym.train_recipes.gpu_allocation import (
     GpuAllocation,
     resolve_gpu_allocation,
@@ -41,6 +42,7 @@ JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimoda
 
 class BaseTrainRecipe(ABC):
     model_config_class: ClassVar["type[ModelConfig] | None"] = None
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset()
 
     # Fields consumed by the Modal launcher (image build, cluster topology,
     # callable shipping) and never forwarded to the framework CLI. Every
@@ -54,6 +56,7 @@ class BaseTrainRecipe(ABC):
     # win over same-named top-level fields.
     _ESCAPE_HATCH_FIELD: ClassVar[str] = "extra_config"
     _ESCAPE_HATCH_FLAG: ClassVar[str] = "custom_config_path"
+    _materialized_config_keys: tuple[str, ...] | None = None
 
     # ── Callable → import path ────────────────────────────────────────────────
 
@@ -109,6 +112,17 @@ class BaseTrainRecipe(ABC):
         """Validate the model's parallelism settings."""
         return None
 
+    def active_modalities(self) -> frozenset[str]:
+        """Media this recipe instance is training on, beyond text."""
+        return type(self).trainable_modalities
+
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        return {}
+
     # ── Container → framework flag converters ────────────────────────────────
 
     @staticmethod
@@ -137,6 +151,13 @@ class BaseTrainRecipe(ABC):
                     f"Training and evaluation datasets must use the same "
                     f"{dataset_method}(): got {train_value!r} and {eval_value!r}."
                 )
+        train_keys = multimodal_key_map(ds)
+        eval_keys = multimodal_key_map(eval_ds)
+        if train_keys != eval_keys:
+            raise TrainingGymConfigError(
+                f"Training and evaluation datasets must use the same "
+                f"media columns: got {train_keys!r} and {eval_keys!r}."
+            )
 
     @classmethod
     def _dataset_to_fields(
@@ -184,7 +205,7 @@ class BaseTrainRecipe(ABC):
         val = getattr(self, self._ESCAPE_HATCH_FIELD, None)
         if isinstance(val, dict):
             return tuple(val)
-        return tuple(getattr(self, "_materialized_config_keys", ()) or ())
+        return tuple(self._materialized_config_keys or ())
 
     def _escape_hatch_values(self) -> dict[str, Any]:
         """The escape-hatch mapping, before or after it is written to YAML."""
@@ -193,6 +214,17 @@ class BaseTrainRecipe(ABC):
             return val
         stored = getattr(self, "_materialized_config", None)
         return stored if isinstance(stored, dict) else {}
+
+    def effective_megatron_to_hf_mode(
+        self,
+        dataset: "DatasetConfig | None" = None,
+        model: "ModelConfig | None" = None,
+    ) -> str:
+        """megatron_to_hf_mode as cli_args() will emit it."""
+        resolved = self.overrides(dataset, model).get(
+            "megatron_to_hf_mode", getattr(self, "megatron_to_hf_mode", None)
+        )
+        return self._escape_hatch_values().get("megatron_to_hf_mode", resolved) or ""
 
     def _emit_fields(self, fields: dict[str, Any]) -> dict[str, Any]:
         """Drop launcher-only fields and let the escape hatch win over same-named flags.

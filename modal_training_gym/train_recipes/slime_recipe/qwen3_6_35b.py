@@ -10,9 +10,11 @@ from modal_training_gym.train_recipes.slime_recipe.recipe import SlimeRecipe
 class Qwen3_6_35B_Recipe(SlimeRecipe):
     """Qwen3.6-35B-A3B recipe."""
 
-    gpu_type: str = "B300"
+    gpu_type: str = "B200"
     colocate: bool = False
-    rollout_num_gpus: int | None = 1
+    actor_num_gpus_per_node: int = 2
+    rollout_num_gpus: int | None = 2
+    rollout_num_gpus_per_engine: int = 2
     slime_model_script: str = "scripts/models/qwen3.5-35B-A3B.sh"
     hf_checkpoint: str = "Qwen/Qwen3.6-35B-A3B"
     train_function_kwargs: dict[str, int] = field(
@@ -20,11 +22,13 @@ class Qwen3_6_35B_Recipe(SlimeRecipe):
     )
 
     context_parallel_size: int = 1
-    expert_model_parallel_size: int = 1
+    expert_model_parallel_size: int = 2
     expert_tensor_parallel_size: int = 1
-    sglang_ep_size: int | None = 1
+    sglang_ep_size: int | None = 2
+    conversion_tensor_model_parallel_size: int = 1
+    conversion_pipeline_model_parallel_size: int = 1
     sglang_attention_backend: str | None = "triton"
-    sglang_moe_runner_backend: str | None = "flashinfer_trtllm_routed"
+    sglang_moe_runner_backend: str | None = "triton"
     sglang_cuda_graph_bs: list[int] | None = field(
         default_factory=lambda: [1, 2, 4, 8] + list(range(16, 257, 8))
     )
@@ -47,5 +51,6 @@ class Qwen3_6_35B_Recipe(SlimeRecipe):
     memory: int | tuple[int, int] | None = (128, 2_097_152)
     attention_backend: str = "unfused"
 
-    ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"
     no_save_optim: bool = True
+
+    torch_dist_ref_load: str = "/checkpoints/Qwen3.6-35B-A3B_torch_dist_tp1pp1"

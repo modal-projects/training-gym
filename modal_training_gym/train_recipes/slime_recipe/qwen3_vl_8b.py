@@ -19,7 +19,7 @@ class Qwen3_VL_8B_Recipe(SlimeRecipe):
         default_factory=lambda: {"qkv_format": "bshd", "micro_batch_size": 1}
     )
 
-    megatron_to_hf_mode: str = "bridge"
+    megatron_to_hf_mode: str | None = "bridge"
 
     sglang_mem_fraction_static: float = 0.55
     freeze_params_name_list: list[str] | None = field(
