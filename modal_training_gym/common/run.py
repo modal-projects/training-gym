@@ -315,7 +315,13 @@ class TrainingRun(BaseModel):
             if self._function_call is not None or self.function_call_id:
                 try:
                     payload = self.function_call.get(timeout=timeout)
-                except TimeoutError:
+                except TimeoutError as exc:
+                    if not str(exc):
+                        exc.args = (
+                            f"Timed out after {timeout}s waiting for "
+                            f"training_run_id={self.training_run_id}",
+                        )
+                    exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]
                     raise
                 except BaseException as exc:
                     message = str(exc)

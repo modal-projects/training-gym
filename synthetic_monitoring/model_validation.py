@@ -46,6 +46,9 @@ probe_image = (
 )
 
 slack_secret = modal.Secret.from_name("gym-bot-slack", environment_name=MODAL_ENV)
+# HF_TOKEN in the probe container is forwarded to training containers by
+# ``hf_secrets()``; without it Hub downloads are unauthenticated and throttled.
+hf_secret = modal.Secret.from_name("huggingface-secret", environment_name="main")
 
 app = modal.App("gym-synmon-launcher")
 
@@ -152,6 +155,13 @@ def _record(model: str, point: RunPoint) -> list[RunPoint]:
         return [point]
 
 
+def _format_error(exc: BaseException, subject: str) -> str:
+    message = str(exc)
+    if not message and isinstance(exc, TimeoutError):
+        message = f"{subject} did not finish within {PROBE_TIMEOUT_S}s"
+    return f"{type(exc).__name__}: {message}"
+
+
 def _row(
     model: str, point: RunPoint, history: list[RunPoint], error: str | None = None
 ) -> dict:
@@ -247,6 +257,7 @@ def _post_report(rows: list[dict]) -> None:
 @app.function(
     image=probe_image,
     timeout=PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
+    secrets=[hf_secret],
 )
 def monitor(model: str = "", num_steps: int = 1) -> dict:
     if model == QUICKSTART_NAME:
@@ -271,7 +282,7 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
             error = None if ok else f"quickstart failed: {training_run.status.value}"
             return _row(QUICKSTART_NAME, point, _record(QUICKSTART_NAME, point), error)
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = _format_error(exc, QUICKSTART_NAME)
             print(f"error: probe failed for {QUICKSTART_NAME}: {error}")
             if run is not None:
                 run.close()
@@ -305,13 +316,18 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
         )
         return _row(selected, point, _record(selected, point), error)
     except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
+        error = _format_error(exc, selected)
         print(f"error: probe failed for {selected}: {error}")
-        url = _lookup_app_url(result.training_run_id) if result else None
+        training_run_id = (
+            result.training_run_id
+            if result
+            else str(getattr(exc, "training_run_id", "") or "")
+        )
+        url = _lookup_app_url(training_run_id)
         point = RunPoint(
             ts=time.time(),
             timings={},
-            training_run_id=getattr(result, "training_run_id", "") or "",
+            training_run_id=training_run_id,
             total_duration_s=float(getattr(result, "total_duration_s", 0) or 0),
             status="failed",
             modal_app_url=url,
