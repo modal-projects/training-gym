@@ -55,8 +55,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     modality: Literal["text", "vision"] = "text"
 
     gpu_type: str = "B300"
-    # Disaggregated like Qwen3.6-35B-A3B: the resident trainer leaves a shared
-    # B300 with too little memory for the SGLang KV cache.
     colocate: bool = False
     rollout_num_gpus: int | None = 1
     image_run_commands: list[str] = field(default_factory=_image_patches)
