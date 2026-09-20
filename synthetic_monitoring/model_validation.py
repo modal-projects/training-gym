@@ -26,8 +26,11 @@ from synthetic_monitoring.chart import RunPoint, render_timing_history_chart
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROBE_TIMEOUT_S = 60 * 60
+# A model with no successful run on record still has to download and convert
+# its checkpoint, so its first probe gets a longer budget.
+COLD_PROBE_TIMEOUT_S = 2 * PROBE_TIMEOUT_S
 CLEANUP_GRACE_S = 5 * 60
-LAUNCH_TIMEOUT_S = PROBE_TIMEOUT_S + CLEANUP_GRACE_S + 30 * 60
+LAUNCH_TIMEOUT_S = COLD_PROBE_TIMEOUT_S + CLEANUP_GRACE_S + 30 * 60
 MODAL_ENV = "training-gym"
 HISTORY_DICT_NAME = "gym-synmon-timing-baselines"
 QUICKSTART_NAME = "quickstart"
@@ -155,10 +158,24 @@ def _record(model: str, point: RunPoint) -> list[RunPoint]:
         return [point]
 
 
-def _format_error(exc: BaseException, subject: str) -> str:
+def _has_succeeded(model: str) -> bool:
+    try:
+        return any(
+            item.get("status") == "success" for item in _history_dict().get(model, [])
+        )
+    except Exception as exc:
+        print(f"error: history lookup failed for {model}: {exc}")
+        return True
+
+
+def _probe_timeout(model: str) -> int:
+    return PROBE_TIMEOUT_S if _has_succeeded(model) else COLD_PROBE_TIMEOUT_S
+
+
+def _format_error(exc: BaseException, subject: str, timeout: int) -> str:
     message = str(exc)
     if not message and isinstance(exc, TimeoutError):
-        message = f"{subject} did not finish within {PROBE_TIMEOUT_S}s"
+        message = f"{subject} did not finish within {timeout}s"
     return f"{type(exc).__name__}: {message}"
 
 
@@ -178,7 +195,7 @@ def _row(
     if ok:
         prior_s = prior.total_duration_s if prior else None
         if prior_s is None:
-            delta = "n/a"
+            delta = "n/a (cold start)"
         else:
             delta_s = point.total_duration_s - prior_s
             delta = (
@@ -256,16 +273,17 @@ def _post_report(rows: list[dict]) -> None:
 
 @app.function(
     image=probe_image,
-    timeout=PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
+    timeout=COLD_PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
     secrets=[hf_secret],
 )
 def monitor(model: str = "", num_steps: int = 1) -> dict:
     if model == QUICKSTART_NAME:
         print(f"synmon: {QUICKSTART_NAME!r}")
         run: TrainingRun | None = None
+        timeout = _probe_timeout(QUICKSTART_NAME)
         try:
             run = runpy.run_module("scripts.quickstart")["run"]
-            completed = run.result(timeout=PROBE_TIMEOUT_S)
+            completed = run.result(timeout=timeout)
             training_run = TrainingRun.from_id(completed.training_run_id)
             url = training_run.modal_app_url or _lookup_app_url(
                 training_run.training_run_id
@@ -282,7 +300,7 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
             error = None if ok else f"quickstart failed: {training_run.status.value}"
             return _row(QUICKSTART_NAME, point, _record(QUICKSTART_NAME, point), error)
         except Exception as exc:
-            error = _format_error(exc, QUICKSTART_NAME)
+            error = _format_error(exc, QUICKSTART_NAME, timeout)
             print(f"error: probe failed for {QUICKSTART_NAME}: {error}")
             if run is not None:
                 run.close()
@@ -298,12 +316,11 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
             return _row(QUICKSTART_NAME, point, _record(QUICKSTART_NAME, point), error)
 
     selected = _ValidationConfig.find(model).name
-    print(f"synmon: model={selected!r} num_steps={num_steps}")
+    timeout = _probe_timeout(selected)
+    print(f"synmon: model={selected!r} num_steps={num_steps} timeout={timeout}s")
     result: ValidationResult | None = None
     try:
-        result = run_base_training(
-            selected, step_count=num_steps, timeout=PROBE_TIMEOUT_S
-        )
+        result = run_base_training(selected, step_count=num_steps, timeout=timeout)
         url = _lookup_app_url(result.training_run_id)
         point = RunPoint.from_validation_result(result, modal_app_url=url)
         error = (
@@ -316,7 +333,7 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
         )
         return _row(selected, point, _record(selected, point), error)
     except Exception as exc:
-        error = _format_error(exc, selected)
+        error = _format_error(exc, selected, timeout)
         print(f"error: probe failed for {selected}: {error}")
         training_run_id = (
             result.training_run_id
