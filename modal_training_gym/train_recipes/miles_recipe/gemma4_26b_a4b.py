@@ -55,6 +55,10 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     modality: Literal["text", "vision"] = "text"
 
     gpu_type: str = "B300"
+    # Disaggregated like Qwen3.6-35B-A3B: the resident trainer leaves a shared
+    # B300 with too little memory for the SGLang KV cache.
+    colocate: bool = False
+    rollout_num_gpus: int | None = 1
     image_run_commands: list[str] = field(default_factory=_image_patches)
 
     hf_checkpoint: str = "google/gemma-4-26B-A4B-it"
@@ -79,7 +83,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     )
 
     rollout_health_check_first_wait: int = 300
-    sglang_mem_fraction_static: float = 0.25
     # Gemma-4's global head_dim=512 exceeds FlashAttention's 256 cap.
     sglang_attention_backend: str = "triton"
     sglang_moe_runner_backend: str = "triton"
