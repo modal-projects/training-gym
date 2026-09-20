@@ -321,7 +321,7 @@ class TrainingRun(BaseModel):
                             f"Timed out after {timeout}s waiting for "
                             f"training_run_id={self.training_run_id}",
                         )
-                    exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]
+                    exc.training_run_id = self.training_run_id
                     raise
                 except BaseException as exc:
                     message = str(exc)
@@ -334,7 +334,7 @@ class TrainingRun(BaseModel):
                         except (AttributeError, TypeError):
                             pass
                     try:
-                        exc.training_run_id = self.training_run_id  # pyright: ignore[reportAttributeAccessIssue]
+                        exc.training_run_id = self.training_run_id
                     except AttributeError:
                         pass
                     self._reload()

@@ -46,8 +46,6 @@ probe_image = (
 )
 
 slack_secret = modal.Secret.from_name("gym-bot-slack", environment_name=MODAL_ENV)
-# HF_TOKEN in the probe container is forwarded to training containers by
-# ``hf_secrets()``; without it Hub downloads are unauthenticated and throttled.
 hf_secret = modal.Secret.from_name("huggingface-secret", environment_name="main")
 
 app = modal.App("gym-synmon-launcher")
@@ -290,8 +288,8 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
             point = RunPoint(
                 ts=time.time(),
                 timings={},
-                training_run_id=getattr(run, "training_run_id", "") or "",
-                total_duration_s=float(getattr(run, "duration_seconds", 0) or 0),
+                training_run_id=run.training_run_id,
+                total_duration_s=run.duration_seconds,
                 status="failed",
                 modal_app_url=url,
             )
