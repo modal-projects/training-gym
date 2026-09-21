@@ -33,6 +33,7 @@ from modal_training_gym.frameworks.slime import build_slime_app
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+from modal_training_gym.train_recipes.stitch_recipe import StitchRecipe
 from modal_training_gym.utils.metadata import MetadataStore, vol_put
 
 
@@ -349,7 +350,7 @@ class TrainConfig:
     # ── Composed configs (required) ─────────────────────────────────────────
     dataset: DatasetConfig
     model: ModelConfig
-    recipe: SlimeRecipe | MilesRecipe
+    recipe: SlimeRecipe | MilesRecipe | StitchRecipe
     eval_dataset: DatasetConfig | None = None
     resume_from_checkpoint: Checkpoint | None = None
     # Whether a run outlives the local client. The app itself is always started
@@ -386,7 +387,7 @@ class TrainConfig:
             self.model.model_path or "",
         )
 
-    def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe:
+    def _prepare_recipe(self) -> SlimeRecipe | MilesRecipe | StitchRecipe:
         if self.resume_from_checkpoint is None:
             recipe = _dc.replace(self.recipe)
         else:
@@ -430,6 +431,19 @@ class TrainConfig:
                 name=training_run_id,
                 group_id=self.group_id,
             )
+        if isinstance(recipe, StitchRecipe):
+            from modal_training_gym.frameworks.stitch import build_stitch_app
+
+            return build_stitch_app(
+                training_run_id=training_run_id,
+                recipe=recipe,
+                model=self.model,
+                dataset=self.dataset,
+                eval_dataset=self.eval_dataset,
+                checkpoint=self.resume_from_checkpoint,
+                name=training_run_id,
+                group_id=self.group_id,
+            )
         raise TrainingGymConfigError(
             f"Unknown training recipe: {type(recipe).__name__}"
         )
@@ -442,6 +456,8 @@ class TrainConfig:
             return Framework.SLIME
         if isinstance(self.recipe, MilesRecipe):
             return Framework.MILES
+        if isinstance(self.recipe, StitchRecipe):
+            return Framework.STITCH
         raise TrainingGymConfigError(
             f"Unknown training recipe: {type(self.recipe).__name__}"
         )
@@ -450,6 +466,9 @@ class TrainConfig:
         if self.framework is Framework.SLIME:
             return SlimeStatus.INITIALIZING
         if self.framework is Framework.MILES:
+            return MilesStatus.INITIALIZING
+        if self.framework is Framework.STITCH:
+            # The stitch trainer is miles, so it reports miles phases.
             return MilesStatus.INITIALIZING
         raise TrainingGymConfigError(f"Unknown training framework: {self.framework}")
 
@@ -486,7 +505,7 @@ class TrainConfig:
             "global_batch_size": getattr(recipe, "global_batch_size", None),
         }
 
-        if isinstance(recipe, SlimeRecipe | MilesRecipe):
+        if isinstance(recipe, (SlimeRecipe, MilesRecipe)):
             from modal_training_gym.common.launcher_utils import (
                 serialize_recipe_params,
             )
@@ -503,6 +522,23 @@ class TrainConfig:
                     model=model,
                 ),
             }
+        elif isinstance(recipe, StitchRecipe):
+            summary["lr"] = recipe.train.lr
+            summary["global_batch_size"] = recipe.train.global_batch_size
+            summary["recipe"] = {
+                "gpu_type": recipe.train.gpu_type,
+                "actor_num_nodes": recipe.train.actor_num_nodes,
+                "actor_num_gpus_per_node": recipe.train.actor_num_gpus_per_node,
+                "served_checkpoint_format": recipe.served_checkpoint_format,
+                "rollout_gpu": recipe.serve.gpu,
+                "rollout_gpus_per_replica": recipe.serve.gpus_per_replica,
+                "rollout_min_containers": recipe.serve.min_containers,
+                "rollout_max_containers": recipe.serve.max_containers,
+            }
+        else:
+            raise TrainingGymConfigError(
+                f"Unknown recipe type: {type(recipe).__name__}"
+            )
 
         return summary
 
@@ -571,15 +607,24 @@ class TrainConfig:
         Returns:
             The completed training run.
         """
-        from modal_training_gym.common.modal_lifecycle import stop_app
-
         launch = self.launch(show_output=show_output)
         try:
             return launch.result(stop_app_on_success=True)
         except BaseException:
-            if not self.detach and launch.modal_app_id:
-                stop_app(launch.modal_app_id)
+            if not self.detach:
+                launch.close()
             raise
+
+    @property
+    def _stop_app_on_failure(self) -> bool:
+        """Whether a failed run's app has to be stopped rather than left up.
+
+        A detached app is normally left running so its logs and containers can be
+        inspected. A stitch app is the exception: its rollout pool keeps warm GPU
+        replicas independent of the trainer call, so leaving it up would hold them
+        for the app's whole timeout.
+        """
+        return not self.detach or isinstance(self.recipe, StitchRecipe)
 
     def launch(
         self,
@@ -672,29 +717,45 @@ class TrainConfig:
                                 is_active=is_active,
                             )
 
-                        megatron_to_hf_mode = getattr(
-                            self.recipe, "megatron_to_hf_mode", ""
-                        )
-                        needs_conversion = megatron_to_hf_mode != "bridge"
-                        download_status, convert_status = (
-                            (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
-                            if isinstance(self.recipe, SlimeRecipe)
-                            else (MilesStatus.DOWNLOAD_MODEL, MilesStatus.CONVERT_MODEL)
-                        )
-                        _set_status(download_status, is_active=False)
-                        app.download.remote(
-                            training_run_id=training_run_id,
-                            framework_status_url=framework_status_url,
-                            framework_status_token=framework_status_token,
-                        )
-                        if needs_conversion:
-                            _set_status(convert_status, is_active=False)
-                            _convert_checkpoint_on_cache_miss(
-                                app,
+                        if isinstance(self.recipe, StitchRecipe):
+                            # No torch_dist conversion: the stitch trainer loads
+                            # the HF masters through megatron-bridge. It does
+                            # need its served baseline built, which is what a
+                            # delta applies against, so that replaces the
+                            # conversion step.
+                            _set_status(MilesStatus.DOWNLOAD_MODEL, is_active=False)
+                            app.download.remote()
+                            _set_status(MilesStatus.PREPARE_DATASET, is_active=False)
+                            app.prepare_dataset.remote()
+                            _set_status(MilesStatus.CONVERT_MODEL, is_active=False)
+                            app.prepare_checkpoints.remote()
+                        else:
+                            megatron_to_hf_mode = getattr(
+                                self.recipe, "megatron_to_hf_mode", ""
+                            )
+                            needs_conversion = megatron_to_hf_mode != "bridge"
+                            download_status, convert_status = (
+                                (SlimeStatus.DOWNLOAD_MODEL, SlimeStatus.CONVERT_MODEL)
+                                if isinstance(self.recipe, SlimeRecipe)
+                                else (
+                                    MilesStatus.DOWNLOAD_MODEL,
+                                    MilesStatus.CONVERT_MODEL,
+                                )
+                            )
+                            _set_status(download_status, is_active=False)
+                            app.download.remote(
                                 training_run_id=training_run_id,
                                 framework_status_url=framework_status_url,
                                 framework_status_token=framework_status_token,
                             )
+                            if needs_conversion:
+                                _set_status(convert_status, is_active=False)
+                                _convert_checkpoint_on_cache_miss(
+                                    app,
+                                    training_run_id=training_run_id,
+                                    framework_status_url=framework_status_url,
+                                    framework_status_token=framework_status_token,
+                                )
 
                         function_call = app.train.spawn(
                             modal_app_id=modal_app_id,
@@ -723,6 +784,18 @@ class TrainConfig:
                 raise error from exc
             launch_error = exc
 
+        if function_call is None:
+            # Modal exits ``app.run`` cleanly on an interrupt, so the input
+            # preparation above can be cut short without raising. This is outside
+            # ``train``'s teardown, so a pool that came up with the app has to be
+            # stopped here.
+            if self._stop_app_on_failure and modal_app_id:
+                stop_app(modal_app_id)
+            raise RuntimeError(
+                f"training was never spawned for {training_run_id}: the Modal app "
+                "run ended while preparing inputs. The app is detached and its "
+                "prepared inputs persist, so re-running resumes from them."
+            )
         run_record.function_call_id = function_call.object_id
         run_record._function_call = function_call
         run_record._status_display = status_display if show_output else None

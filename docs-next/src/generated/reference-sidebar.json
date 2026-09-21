@@ -77,6 +77,18 @@
       "link": "/reference/parsedresponse"
     },
     {
+      "label": "Qwen3_30B_A3B_Stitch_Recipe",
+      "link": "/reference/qwen3_30b_a3b_stitch_recipe"
+    },
+    {
+      "label": "Qwen3_6_27B_Recipe_Agentic",
+      "link": "/reference/qwen3_6_27b_recipe_agentic"
+    },
+    {
+      "label": "Qwen3_6_35B_Recipe_Long_Context",
+      "link": "/reference/qwen3_6_35b_recipe_long_context"
+    },
+    {
       "label": "Sample",
       "link": "/reference/sample"
     },
@@ -87,6 +99,18 @@
     {
       "label": "SlimeRecipe",
       "link": "/reference/slimerecipe"
+    },
+    {
+      "label": "StitchRecipe",
+      "link": "/reference/stitchrecipe"
+    },
+    {
+      "label": "StitchServeConfig",
+      "link": "/reference/stitchserveconfig"
+    },
+    {
+      "label": "StitchTrainConfig",
+      "link": "/reference/stitchtrainconfig"
     },
     {
       "label": "ToolCall",

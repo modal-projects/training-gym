@@ -20,6 +20,77 @@ TESTDATA = Path(__file__).parent / "testdata"
 FRAMEWORKS = Path(__file__).parents[1] / "modal_training_gym" / "frameworks"
 
 
+def test_miles_async_external_weight_sync_keeps_timing(tmp_path):
+    from modal_training_gym.frameworks.miles.modal_helpers.patches import (
+        patch_substep_timing as patcher,
+    )
+
+    source = (TESTDATA / "miles/train_async.py.status.output").read_text()
+    source = source.replace(
+        "    await actor_model.update_weights()\n",
+        "    initial_weight_sync_task = None\n"
+        "    if external_disk_deltas:\n"
+        "        initial_weight_sync_task = asyncio.create_task(actor_model.update_weights())\n"
+        "    else:\n"
+        "        await actor_model.update_weights()\n",
+        1,
+    )
+    source = source.replace(
+        "        await eval_dispatcher.dispatch(0, hf_dir=args.hf_checkpoint)\n",
+        "        if initial_weight_sync_task is not None:\n"
+        "            await initial_weight_sync_task\n"
+        "            initial_weight_sync_task = None\n"
+        "        await eval_dispatcher.dispatch(0, hf_dir=args.hf_checkpoint)\n",
+    )
+    old = next(
+        block
+        for block, phase in patcher.ENTRYPOINTS["train_async.py"]
+        if phase == "wait_for_next_rollout"
+    )
+    source = source.replace(
+        old,
+        "            if not live_weight_sync_can_overlap:\n"
+        "                rollout_data_curr_ref = (await x) if (x := rollout_data_next_future) is not None else None\n"
+        "                rollout_data_next_future = None\n",
+    )
+    path = tmp_path / "train_async.py"
+    path.write_text(source)
+    patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    patched = path.read_text()
+    compile(patched, str(path), "exec")
+    assert "asyncio.create_task(actor_model.update_weights())" in patched
+    assert "if not live_weight_sync_can_overlap:" in patched
+    assert "with _tg_rec.phase('wait_for_next_rollout'):" in patched
+    assert "with _tg_rec.phase('initial_weight_sync'):" in patched
+    assert "with _tg_rec.phase('evaluate_rollouts'):" in patched
+    patcher._patch_file(path, patcher.ENTRYPOINTS[path.name])
+    assert path.read_text() == patched
+
+
+def test_miles_rollout_data_pack_keeps_timing(tmp_path):
+    from modal_training_gym.frameworks.miles.modal_helpers.patches import (
+        patch_substep_timing as patcher,
+    )
+
+    target = patcher.PACKAGE_TARGETS[0]
+    path = tmp_path / target.path
+    path.parent.mkdir(parents=True)
+    source = (
+        (TESTDATA / "miles/rollout_manager.py.input")
+        .read_text()
+        .replace(
+            "return dict(sample_indices=sample_indices, data_ref=data_ref)",
+            "return dict(sample_indices=sample_indices, **data_pack)",
+        )
+    )
+    path.write_text(source)
+    patcher._patch_package_file(tmp_path, target)
+    patched = path.read_text()
+    compile(patched, str(path), "exec")
+    assert "with _tg_role('rollout', rollout_id):" in patched
+    assert "return dict(sample_indices=sample_indices, **data_pack)" in patched
+
+
 def patcher_path(framework: str) -> Path:
     return (
         FRAMEWORKS / framework / "modal_helpers" / "patches" / "patch_substep_timing.py"

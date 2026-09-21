@@ -29,7 +29,7 @@ DEPLOY_FRAMEWORKS = (
     "modal_training_gym.deploy_recipes.sglang_recipe",
     "modal_training_gym.deploy_recipes.vllm_recipe",
 )
-BASE_RECIPES = {"SlimeRecipe", "MilesRecipe"}
+BASE_RECIPES = {"SlimeRecipe", "MilesRecipe", "StitchRecipe"}
 BASE_DEPLOY_RECIPES = {"SglangRecipe", "VllmRecipe"}
 FRAMEWORK_BASES = frozenset({*BASE_RECIPES, *BASE_DEPLOY_RECIPES, "MilesConfig"})
 MODEL_CONFIGS = {name.lower(): getattr(models, name) for name in models.__all__}
@@ -69,7 +69,7 @@ def iter_registered_recipes() -> Iterator[tuple[str, Any, Any, str]]:
     for module_path in FRAMEWORKS:
         registry = importlib.import_module(module_path)
         for recipe_name in registry.__all__:
-            if recipe_name in BASE_RECIPES:
+            if recipe_name in BASE_RECIPES or not recipe_name.endswith("_Recipe"):
                 continue
             recipe = getattr(registry, recipe_name)
             config = recipe.model_config_class or MODEL_CONFIGS.get(
