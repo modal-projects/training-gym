@@ -364,7 +364,12 @@ def test_launch_covers_every_pinned_endpoint_create_flag() -> None:
         "colocate_compute",
     }
     named_by_checkpoint = {"custom_volume_name", "custom_volume_path"}
-    unsupported = {"custom_hf_repo", "custom_hf_revision", "custom_hf_token"}
+    unsupported = {
+        "custom_hf_repo",
+        "custom_hf_revision",
+        "custom_hf_token",
+        "compute_regions",
+    }
 
     click_dests = frozenset(
         param.name for param in modal_endpoint_create.params if param.name
