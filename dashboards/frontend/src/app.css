@@ -953,6 +953,53 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   border-right: 1px dashed var(--color-c-gray-100, #fff);
 }
 
+/* ===== components/ChartZoomButtons.svelte ===== */
+.chart-zoom-buttons {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+.chart-zoom-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border, #3a3a3a);
+  background: var(--color-c-gray-08, #1c1c1c);
+  color: var(--color-icon-primary, #a3a3a3);
+  cursor: pointer;
+}
+
+.chart-zoom-buttons button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.chart-zoom-buttons button:last-child {
+  border-radius: 0 4px 4px 0;
+  margin-left: -1px;
+}
+
+.chart-zoom-buttons button:hover:not(:disabled) {
+  background: var(--color-c-gray-10, #2f2f2f);
+  color: var(--text-bright, #fff);
+  z-index: 1;
+}
+
+.chart-zoom-buttons button:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 1px;
+  z-index: 1;
+}
+
+.chart-zoom-buttons button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ===== components/ChartControls.svelte / ZoomOutButton.svelte / MetricsRangeDropdown.svelte ===== */
 .chart-controls-bar {
   display: flex;

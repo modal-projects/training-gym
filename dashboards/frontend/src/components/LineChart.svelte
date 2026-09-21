@@ -1,7 +1,8 @@
 <script>
-  import { brushZoom, fractionsToDomain } from "../lib/brushZoom.js";
+  import { brushZoom, fractionsToDomain, zoomFractions, ZOOM_STEP } from "../lib/brushZoom.js";
   import { trailingMean } from "../lib/smoothing.js";
   import { niceTicks } from "../lib/ticks.js";
+  import ChartZoomButtons from "./ChartZoomButtons.svelte";
   import TimeAxis from "./TimeAxis.svelte";
 
   let {
@@ -14,15 +15,15 @@
     lines = [],
     smoothable = false,
     smoothingWindow = 5,
-    // W&B-style panel: y range fit to the data, tick labels + gridlines,
-    // wheel left to the page (drag still zooms).
+    // W&B-style panel: y range fit to the data, tick labels + gridlines.
     axes = false,
     ariaLabel = title || "Line chart",
     formatX = (row) => String(row?.x ?? ""),
     formatY = (value) => String(value),
     // `[min, max]` in x units; defaults to the data extent.
     xDomain = null,
-    // Called with `[min, max]` in x units when the user drags or wheels.
+    // Called with `[min, max]` in x units when the user drags a window or
+    // presses the zoom buttons.
     onChangeDomainX = null,
     // x units <-> epoch seconds; when both are given a wall-clock axis is
     // drawn under the plot.
@@ -141,6 +142,8 @@
     if (!zoomable) return;
     onChangeDomainX(fractionsToDomain(fractions, [xMin, xMax]));
   }
+  const zoomIn = () => handleBrush(zoomFractions(1 / ZOOM_STEP));
+  const zoomOut = () => handleBrush(zoomFractions(ZOOM_STEP));
 
   function pathFor(key) {
     let d = "";
@@ -220,10 +223,10 @@
 </script>
 
 <div class="min-w-0">
-  {#if title || showLegend || smoothable}
+  {#if title || showLegend || smoothable || zoomable}
     <div class="flex flex-wrap items-center gap-x-[12px] gap-y-[4px] mb-[6px]">
       {#if title}
-        <div class="text-(--text-bright) text-[12px] font-[600] mr-auto">{title}</div>
+        <div class="text-(--text-bright) text-[12px] font-[600] mr-auto min-w-0 truncate" {title}>{title}</div>
       {/if}
       {#if showLegend}
         <div class="flex flex-wrap items-center gap-[10px] text-[11px] text-(--muted)" aria-label="Series">
@@ -255,6 +258,13 @@
           <span>Smoothing</span>
         </label>
       {/if}
+      {#if zoomable}
+        <ChartZoomButtons
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          canZoomIn={rows.length > 1 || hasDomain}
+        />
+      {/if}
     </div>
   {/if}
 
@@ -275,7 +285,7 @@
       aria-label={ariaLabel}
       onpointermove={onPointerMove}
       onpointerleave={onPointerLeave}
-      use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable, enableWheelZoom: !axes }}
+      use:brushZoom={{ onChangeDomainX: handleBrush, enabled: zoomable }}
     >
       <svg class="block w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {#each yTicks as tick (tick)}
