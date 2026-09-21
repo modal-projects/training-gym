@@ -1,13 +1,13 @@
 """Validate a model config by running base training on its framework.
 
 The model registry (``common/models/validation.py``) says which framework
-trains each model and whether it is cheap enough to gate PRs on;
-``build_recipe_and_dataset`` in ``scripts/validation_backends/`` supplies that
-framework's recipe and dataset. Everything below is framework-agnostic.
+trains each model; ``build_recipe_and_dataset`` in
+``scripts/validation_backends/`` supplies that framework's recipe and dataset.
+Everything below is framework-agnostic.
 
 Usage:
     uv run scripts/validate_model_configs.py list
-    uv run scripts/validate_model_configs.py list --names-only --pr-only
+    uv run scripts/validate_model_configs.py list --names-only
     uv run scripts/validate_model_configs.py list --framework miles
     uv run scripts/validate_model_configs.py check -m qwen3-4b
     uv run scripts/validate_model_configs.py check -m Qwen3.5-4B-Miles
@@ -295,32 +295,22 @@ class ValidationResult:
         )
 
 
-def available_model_names(
-    framework: Framework | None = None, *, pr_only: bool = False
-) -> list[str]:
-    """Sorted model names, everything the harness can run unless narrowed.
-
-    Listing is for a human deciding what to dispatch, so it shows the whole
-    registry; ``pr_only=True`` narrows to the set a pull request fans out on
-    its own, which is what builds a matrix.
-    """
-    return [
-        config.name for config in _ValidationConfig.select(framework, pr_only=pr_only)
-    ]
+def available_model_names(framework: Framework | None = None) -> list[str]:
+    """Sorted model names the harness can run."""
+    return [config.name for config in _ValidationConfig.select(framework)]
 
 
 def available_models(
-    framework: Framework | None = None, *, pr_only: bool = False
-) -> list[dict[str, str | bool]]:
+    framework: Framework | None = None,
+) -> list[dict[str, str]]:
     """Registry details for humans inspecting supported validation models."""
     return [
         {
             "name": config.name,
             "model_name": config.model_name,
             "framework": config.framework.value,
-            "run_on_pr": config.run_on_pr,
         }
-        for config in _ValidationConfig.select(framework, pr_only=pr_only)
+        for config in _ValidationConfig.select(framework)
     ]
 
 
@@ -388,10 +378,11 @@ def run_base_training(
     train_config = TrainConfig(
         model=model_config,
         dataset=dataset,
+        eval_dataset=dataset,
         recipe=train_recipe,
     )
 
-    launch = train_config.launch(prepare_inputs=True)
+    launch = train_config.launch()
     try:
         train_result = launch.result(timeout=timeout)
     except BaseException:
@@ -816,13 +807,6 @@ def __main__():
         help="Only list models validated on this framework.",
     )
     list_parser.add_argument(
-        "--pr-only",
-        action="store_true",
-        help="Only models a pull request fans out on its own (run_on_pr=True), "
-        "i.e. what belongs in a PR matrix. The default lists everything, "
-        "including dispatch-only models.",
-    )
-    list_parser.add_argument(
         "--names-only",
         action="store_true",
         help="Print only model names as a JSON array, for CI matrix consumers.",
@@ -854,9 +838,9 @@ def __main__():
         framework = Framework(args.framework) if args.framework else None
         print(
             json.dumps(
-                available_model_names(framework, pr_only=args.pr_only)
+                available_model_names(framework)
                 if args.names_only
-                else available_models(framework, pr_only=args.pr_only)
+                else available_models(framework)
             )
         )
         return

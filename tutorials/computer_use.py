@@ -22,6 +22,7 @@
 # toward −1 over a margin scaled to the element's own size.
 
 import re
+import time
 
 from modal_training_gym import (
     CustomDeployment,
@@ -59,23 +60,19 @@ GROUNDING_PROMPT = (
     "horizontal and vertical position on the screen."
 )
 
+
 class ScreenSpotDataset(MultimodalDataset):
     """GUI grounding dataset from ScreenSpot."""
 
-    modality = "image"
     hf_repo = "rootsautomation/ScreenSpot"
     hf_split = "test"
-    n_rows = 800
-    row_offset = 0
-    always_prepare = True
-    # Collapse to one chat-templated string; the VL processor crashes on raw
-    # message lists.
-    apply_chat_template = True
 
-    def __init__(self, **kwargs):
-        super().__init__(rows=[], **kwargs)
+    def __init__(self, *, n_rows: int, row_offset: int = 0):
+        self.n_rows = n_rows
+        self.row_offset = row_offset
+        super().__init__(modality="image")
 
-    def _build_rows(self) -> list[dict]:
+    def source_rows(self):
         import base64
         import io
 
@@ -85,7 +82,6 @@ class ScreenSpotDataset(MultimodalDataset):
         start = min(self.row_offset, len(ds))
         stop = min(start + self.n_rows, len(ds))
         # Demo-scale: inline base64 rows in memory; stream large corpora.
-        rows = []
         for row in ds.select(range(start, stop)):
             left, top, right, bottom = row["bbox"]
             instruction = row["instruction"]
@@ -95,28 +91,12 @@ class ScreenSpotDataset(MultimodalDataset):
             img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             data_uri = f"data:image/png;base64,{img_b64}"
 
-            rows.append(
-                {
-                    self.input_key: GROUNDING_PROMPT.format(
-                        instruction=instruction
-                    ),
-                    self.media_column: [data_uri],
-                    self.label_key: (
-                        f"{left:.4f},{top:.4f},{right:.4f},{bottom:.4f}"
-                    ),
-                }
-            )
-        return rows
+            yield {
+                "prompt": GROUNDING_PROMPT.format(instruction=instruction),
+                "media": data_uri,
+                "label": f"{left:.4f},{top:.4f},{right:.4f},{bottom:.4f}",
+            }
 
-    def load(self, split: str = "all") -> list[dict]:
-        return self._build_rows()
-
-    def prepare(self, path, eval_paths=None):
-        rows = self._build_rows()
-        self._write_jsonl(rows, path)
-        if eval_paths:
-            for eval_path in eval_paths.values():
-                self._write_jsonl(rows, eval_path)
 
 train_dataset = ScreenSpotDataset(n_rows=800)
 
@@ -147,6 +127,7 @@ eval_dataset = ScreenSpotDataset(n_rows=200, row_offset=800)
 #
 # The model also gets −1 if it fails to output parseable coordinates.
 
+
 def _parse_coordinates(text: str) -> tuple[float, float] | None:
     """Extract (x, y) from model output like '(0.45, 0.32)' or '0.45, 0.32'."""
     nums = re.findall(r"([\d.]+)", text)
@@ -160,10 +141,12 @@ def _parse_coordinates(text: str) -> tuple[float, float] | None:
         pass
     return None
 
+
 def _parse_bbox(label: str) -> tuple[float, float, float, float]:
     """Parse a 'left,top,right,bottom' label into floats."""
     left, top, right, bottom = (float(v) for v in label.split(","))
     return left, top, right, bottom
+
 
 def _distance_outside_box(
     x: float, y: float, box: tuple[float, float, float, float]
@@ -173,6 +156,7 @@ def _distance_outside_box(
     dx = max(left - x, 0.0, x - right)
     dy = max(top - y, 0.0, y - bottom)
     return (dx * dx + dy * dy) ** 0.5
+
 
 async def grounding_reward(args, sample, **kwargs) -> float:
     response = getattr(sample, "response", "") or ""
@@ -198,14 +182,14 @@ async def grounding_reward(args, sample, **kwargs) -> float:
         return -1.0
     return 1.0 - 2.0 * outside / margin
 
+
 # ## Baseline Eval
 #
 # Let's evaluate the base Qwen3-VL-8B model on our held-out set before
 # training to see how well it grounds UI elements out of the box.
 
-def grounding_eval_fn(
-    deployment: CustomDeployment, example: dict
-) -> dict:
+
+def grounding_eval_fn(deployment: CustomDeployment, example: dict) -> dict:
     # Eval sends the screenshot as a separate image_url, so drop the marker.
     prompt = example["prompt"].replace("<image>", "").strip()
     label = example["label"]
@@ -239,9 +223,8 @@ def grounding_eval_fn(
         "label": label,
     }
 
-def run_eval(
-    deployment, *, max_concurrency: int = 2
-) -> tuple[float, list[dict]]:
+
+def run_eval(deployment, *, max_concurrency: int = 2) -> tuple[float, list[dict]]:
     from concurrent.futures import ThreadPoolExecutor
 
     deployment.wait_until_ready(timeout=3000)
@@ -250,9 +233,10 @@ def run_eval(
         return grounding_eval_fn(deployment, example)
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        rows = list(executor.map(_score_one, eval_dataset.load()))
+        rows = list(executor.map(_score_one, eval_dataset.rows()))
     mean = sum(r["score"] for r in rows) / len(rows) if rows else float("nan")
     return mean, rows
+
 
 model = Qwen3_VL_8B()
 base_deployment = CustomDeployment.launch(
@@ -300,37 +284,37 @@ config = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_VL_8B_Recipe(
-        # TP=4 shards the 8B weights across 4 GPUs, freeing enough VRAM per
-        # GPU for the large 0.75 KV pool below. (TP=2 OOMs at mem=0.75.)
+        actor_num_gpus_per_node=8,
         tensor_model_parallel_size=4,
-        custom_rm_function=grounding_reward,
         num_rollout=15,
+        save_interval=15,
         rollout_batch_size=8,
         n_samples_per_prompt=4,
-        # We only need 64 tokens here because the model just outputs coordinates.
-        rollout_max_response_len=64,
-        # Give SGLang 75% of VRAM for its KV cache so it can run more
-        # rollouts concurrently, which is feasible because TP=4 frees the VRAM.
-        sglang_mem_fraction_static=0.75,
         global_batch_size=16,
-        lr=1e-6,
-        save_interval=15,
-        # Skip writing optimizer state to the checkpoint since we only serve the
-        # final weights for eval (not resuming training).
+        rollout_max_response_len=64,
+        sglang_mem_fraction_static=0.75,
+        custom_rm_function=grounding_reward,
         no_save_optim=True,
         metrics=WandbConfig(project="computer-use-grounding"),
     ),
 )
-run = config.launch()
-print(f"run id: {run.training_run_id}")
-
 # ## Evaluate the trained model
 #
 # Let's run the same eval on the trained checkpoint and compare accuracy.
 
-result = run.result()
-checkpoint = result.checkpoints()[-1]
-print(f"Checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"Checkpoint: {checkpoint.path}")
 
 trained_deployment = CustomDeployment.launch(
     model,

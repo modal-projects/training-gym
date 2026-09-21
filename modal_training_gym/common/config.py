@@ -26,6 +26,7 @@ MODAL_CONFIG_PATH = Path(
 )
 
 _dashboard_requires_proxy_auth = False
+_dashboard_trajectory_viewer: str | None = None
 DASHBOARD_PROXY_AUTH_PATH = "/api/proxy-auth"
 DASHBOARD_VERSION_PATH = "/api/version"
 
@@ -44,6 +45,24 @@ def set_dashboard_requires_proxy_auth(value: bool) -> None:
 def dashboard_requires_proxy_auth() -> bool:
     """Return the proxy-auth mode for the next dashboard module import."""
     return _dashboard_requires_proxy_auth
+
+
+def set_dashboard_trajectory_viewer(path: str | None) -> None:
+    """Set the custom Svelte trajectory viewer for the next dashboard build."""
+    global _dashboard_trajectory_viewer
+    _dashboard_trajectory_viewer = path
+
+
+def get_dashboard_trajectory_viewer() -> str | None:
+    """Return the configured custom trajectory viewer, if one is configured."""
+    if _dashboard_trajectory_viewer:
+        return _dashboard_trajectory_viewer
+    dashboard = load_config().get("dashboard")
+    if isinstance(dashboard, dict):
+        path = dashboard.get("trajectory_viewer")
+        if isinstance(path, str) and path.strip():
+            return path.strip()
+    return None
 
 
 def load_config() -> dict[str, Any]:
@@ -67,6 +86,23 @@ def save_dashboard_url(url: str, *, proxy_auth: bool | None = None) -> None:
     if proxy_auth is not None:
         dashboard["proxy_auth"] = proxy_auth
     config["dashboard"] = dashboard
+    CONFIG_PATH.write_text(_render(config))
+
+
+def save_dashboard_trajectory_viewer(path: str | None) -> None:
+    """Persist or clear the custom trajectory viewer path."""
+    config = load_config()
+    dashboard = config.get("dashboard")
+    if not isinstance(dashboard, dict):
+        dashboard = {}
+    if path:
+        dashboard["trajectory_viewer"] = path
+    else:
+        dashboard.pop("trajectory_viewer", None)
+    if dashboard:
+        config["dashboard"] = dashboard
+    else:
+        config.pop("dashboard", None)
     CONFIG_PATH.write_text(_render(config))
 
 
@@ -263,13 +299,7 @@ def _format_value(value: Any) -> str:
 
 
 def read_modal_toml_creds() -> tuple[str, str, str]:
-    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``.
-
-    Follows Modal's own profile-selection rules: the ``MODAL_PROFILE`` env
-    var wins if set; otherwise the profile flagged ``active = true``;
-    otherwise the ``[default]`` profile; otherwise the first profile in the
-    file. Returns empty strings if no credentials can be found.
-    """
+    """Resolve ``(token_id, token_secret, profile_name)`` from ``~/.modal.toml``."""
     if not MODAL_CONFIG_PATH.is_file():
         return "", "", ""
 

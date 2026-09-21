@@ -16,27 +16,12 @@ While the model and dataset dictate what will be trained, the recipe dictates ho
 ```python
 from modal_training_gym import Qwen3_5_4B_Recipe
 
-recipe = Qwen3_5_4B_Recipe(
-    gpu_type="H100",
-    actor_num_nodes=1,
-    actor_num_gpus_per_node=8,
-    tensor_model_parallel_size=1,
-    sequence_parallel=False,
-    rollout_num_gpus=8,
-    rollout_num_gpus_per_engine=1,
-    colocate=True,
-    num_rollout=1,
-    n_samples_per_prompt=4,
-    rollout_batch_size=8,
-    rollout_max_response_len=2048,
-    save_interval=5,
-    custom_rm_function=my_custom_rm,
-)
+recipe = Qwen3_5_4B_Recipe()
 ```
 
 We provide optimized recipes for all supported models in the Training Gym, but note that they are easily extensible to fit whatever use case you may have. Under the hood, each recipe is backed by one of two backend frameworks: [Miles](https://github.com/radixark/miles) or [Slime](https://github.com/THUDM/slime). All recipes allow you to specify framework-native parameters using the corresponding recipe fields.
 
-This guide will focus on the most important ones, but feel free to check out the full list for each model on their reference page (e.g., [Qwen3.8 27B](https://gym.modal.dev/reference/qwen3_8_27b_recipe)).
+This guide will focus on the most important ones. However, you can see the full lists for each of the base classes (i.e., [MilesRecipe](https://gym.modal.dev/reference/milesrecipe) and [SlimeRecipe](https://gym.modal.dev/reference/slimerecipe)).
 
 See [this guide](https://gym.modal.dev/guides/metric) for more details on logging integrations.
 
@@ -45,31 +30,44 @@ See [this guide](https://gym.modal.dev/guides/metric) for more details on loggin
 ```python
 recipe = Qwen3_5_4B_Recipe(
     # ...
-    gpu_type="H100",
+    gpu_type="B300",
     actor_num_nodes=1,
     actor_num_gpus_per_node=8,
-    rollout_num_gpus=8,
-    rollout_num_gpus_per_engine=1,
     colocate=True,
 )
 ```
 
 The Gym runs your training workloads across one or more nodes on Modal, each with one or more GPUs. Smaller models (i.e., tens of billions of parameters) can be trained on a single node, while larger models may require a [multi-node cluster](https://modal.com/docs/guide/multi-node-training).
 
-> **Note:** Single-node training is open to everyone. Multi-node clusters are still in Beta. [Contact us on Slack](https://modal.com/slack) for access.
-> 
-
-Each recipe automatically provisions the cluster shape that strikes a balance between cost and throughput, but you may want to optimize this for your needs. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
+Each recipe automatically provisions the smallest cluster shape that will work, but you may want to increase this to maximize throughput. You can choose any type from [Modal’s supported GPUs](https://modal.com/docs/guide/gpu#picking-a-gpu). Also, note that you may not actually need (or even want!) multiple nodes: we suggest setting `actor_num_gpus_per_node` to the [maximum amount](https://modal.com/docs/guide/gpu#specifying-gpu-count) to minimize unnecessary communication between nodes.
 
 Actor parameters pertain to your training cluster, and rollout parameters your rollout cluster. When `colocate` is set to `True`, these are one and the same. When set to `False`, this will create a separate cluster for inference (i.e., disaggregated, async RL), so be sure you have the budget for it!
-
-You can also tune how model computations are parallelized and sharded across multiple GPUs. These parameters can be difficult to determine and may differ for each model, so we provide defaults in each model’s recipe. However, if you’re experiencing out-of-memory errors or want complete control over how your GPUs are utilized, you can manually set these yourself:
 
 ```python
 Qwen3_5_4B_Recipe(
     # ...
+    gpu_type="B300",
+    colocate=False,
+    actor_num_nodes=1,
+    actor_num_gpus_per_node=8,
+    rollout_num_gpus=8,
+    rollout_num_gpus_per_engine=8,
+)
+```
+
+You can also tune how model computations are parallelized and sharded across multiple GPUs. These parameters can be difficult to determine and may differ for each model, so we provide defaults in each model’s recipe. However, if you’re experiencing out-of-memory errors or want complete control over how your GPUs are utilized, you can manually set these yourself:
+
+```python
+from modal_training_gym import Qwen3_5_4B_Miles_Recipe
+
+Qwen3_5_4B_Miles_Recipe(
+    # ...
     tensor_model_parallel_size=2,
     sequence_parallel=True,
+    pipeline_model_parallel_size=1,
+    context_parallel_size=1,
+    expert_model_parallel_size=1,
+    expert_tensor_parallel_size=1,
 )
 ```
 
@@ -77,11 +75,14 @@ Qwen3_5_4B_Recipe(
 
 Each step of training involves the model generating rollouts to calculate rewards. More specifically, a random subset is taken from our dataset to prompt the model, and the model generates one or more completions for each prompt.
 
-The three most important parameters to specify are:
+The four most important parameters to specify are:
 
-- `num_rollout`: (confusingly) the number of steps.
+- `num_rollout`: the number of steps.
 - `rollout_batch_size`: the number of prompts taken from the dataset for each step.
 - `n_samples_per_prompt`: the number of rollouts sampled for each prompt.
+- `global_batch_size`: the number of samples per optimizer step.
+
+Note that the latter three are [related](https://miles.radixark.com/docs/user-guide/concepts#the-four-knob-invariant).
 
 ```python
 Qwen3_5_4B_Recipe(
@@ -89,6 +90,7 @@ Qwen3_5_4B_Recipe(
     num_rollout=10,
     rollout_batch_size=8,
     n_samples_per_prompt=4,
+    global_batch_size=16,
 )
 ```
 
@@ -120,8 +122,6 @@ The simplest reward functions (like the above) return binary scores for correct 
 For logging purposes, you can attach metadata to each sample for more observability in the [dashboard](https://gym.modal.dev/guides/dashboard/).
 
 When your task requires something beyond a single-turn interaction, all it takes is implementing a [custom generate](https://miles.radixark.com/docs/user-guide/generate-endpoint) function.
-
-For an in-depth example, see the [multi-turn RL tutorial](https://gym.modal.dev/tutorials/multiturn/#multi-turn-environment-and-reward).
 
 ```python
 async def my_custom_generate(args, sample, sampling_params):
@@ -186,6 +186,8 @@ Typically, your generation function will:
 2. Make one or multiple calls against the SGLang endpoint to generate responses from the model.
 3. Tokenize the prompt and response with a corresponding loss mask.
 4. Set response fields on the sample.
+
+If the function generates the prompts (i.e., no initial dataset), you must use the [OnlineRollout](https://gym.modal.dev/reference/onlinerollout) class.
 
 Since the containers use [Modal Images](https://modal.com/docs/guide/images) under the hood, you can easily use external packages by extending the base image:
 

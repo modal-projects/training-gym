@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import subprocess
 from types import SimpleNamespace
 from typing import Any
 
@@ -67,19 +68,43 @@ class _FakeModalCli:
         self,
         urls: list[str | None | BaseException] | None,
         stop_returncode: int = 0,
+        stop_error: BaseException | None = None,
     ) -> None:
         self.commands: list[list[str]] = []
         self.run_kwargs: list[dict[str, Any]] = []
         self.servers: list[tuple[str, str, str | None]] = []
         self._urls = urls
         self._stop_returncode = stop_returncode
+        self._stop_error = stop_error
+        self._stop_stdout = ""
+        self._stop_stderr = ""
+        self._create_returncode = 0
+        self._create_stdout = ""
 
     def run(self, command: list[str], **kwargs: Any) -> SimpleNamespace:
         self.commands.append(list(command))
         self.run_kwargs.append(kwargs)
         if "stop" in command:
-            return SimpleNamespace(returncode=self._stop_returncode)
-        return SimpleNamespace(returncode=0)
+            if self._stop_error is not None:
+                raise self._stop_error
+            result = SimpleNamespace(
+                returncode=self._stop_returncode,
+                stdout=self._stop_stdout,
+                stderr=self._stop_stderr,
+            )
+            if kwargs.get("check") and result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    result.returncode,
+                    command,
+                    output=result.stdout,
+                    stderr=result.stderr,
+                )
+            return result
+        return SimpleNamespace(
+            returncode=self._create_returncode,
+            stdout=self._create_stdout,
+            stderr="",
+        )
 
     def from_name(
         self, app_name: str, cls_name: str, environment_name: str | None = None
@@ -115,8 +140,11 @@ def fake_modal_cli(monkeypatch: pytest.MonkeyPatch, clock: _FakeClock):
     def _install(
         urls: list[str | None | BaseException] | None = None,
         stop_returncode: int = 0,
+        stop_error: BaseException | None = None,
     ) -> _FakeModalCli:
-        cli = _FakeModalCli(urls, stop_returncode=stop_returncode)
+        cli = _FakeModalCli(
+            urls, stop_returncode=stop_returncode, stop_error=stop_error
+        )
         monkeypatch.setattr(endpoint_module.subprocess, "run", cli.run)
         monkeypatch.setattr(
             endpoint_module,
@@ -170,7 +198,12 @@ def test_launch_creates_a_public_endpoint(fake_modal_cli) -> None:
     assert "--custom-hf-repo" not in cli.last_command
     assert "--custom-hf-revision" not in cli.last_command
     assert "--custom-hf-token" not in cli.last_command
-    assert cli.run_kwargs[-1] == {"check": True, "timeout": 120}
+    assert cli.run_kwargs[-1] == {
+        "check": False,
+        "timeout": 120,
+        "capture_output": True,
+        "text": True,
+    }
     assert endpoint.model_name == "Qwen/Qwen3-4B"
     assert endpoint.requires_proxy_auth is False
 
@@ -227,7 +260,6 @@ def _checkpoint(
         ("/checkpoints/run-1/iter_10_hf", "/checkpoints", "run-1/iter_10_hf"),
         ("/checkpoints/run-1/iter_10_hf/", "/checkpoints", "run-1/iter_10_hf"),
         ("/data/ckpt/iter_5_hf", "/data/ckpt", "iter_5_hf"),
-        ("run-1/iter_10_hf", "/checkpoints", "run-1/iter_10_hf"),
         ("/checkpoints", "/checkpoints", ""),
     ],
 )
@@ -435,6 +467,54 @@ def test_launch_does_not_stop_by_default(fake_modal_cli) -> None:
     assert [command[4] for command in cli.commands] == ["create"]
 
 
+def test_launch_reuses_existing_named_endpoint(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+    cli._create_returncode = 1
+    cli._create_stdout = "Endpoint 'my-ft' already exists in environment 'ajhinh-dev'."
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=False,
+    )
+
+    assert [command[4] for command in cli.commands] == ["create"]
+    assert endpoint.endpoint_name == "my-ft"
+    assert endpoint.url == _FakeModalCli.DEFAULT_URL
+
+
+def test_launch_raises_when_create_fails(fake_modal_cli) -> None:
+    cli = fake_modal_cli()
+    cli._create_returncode = 1
+    cli._create_stdout = "invalid model"
+
+    with pytest.raises(subprocess.CalledProcessError):
+        Endpoint.launch("Qwen/Qwen3-4B", unauthenticated=True)
+
+    assert [command[4] for command in cli.commands] == ["create"]
+    assert cli.servers == []
+
+
+def test_launch_reuses_existing_named_endpoint_after_recreate_stop(
+    fake_modal_cli,
+) -> None:
+    cli = fake_modal_cli()
+    cli._create_returncode = 1
+    cli._create_stdout = "Endpoint 'my-ft' already exists in environment 'ajhinh-dev'."
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+
+    assert [command[4] for command in cli.commands] == ["stop", "create"]
+    assert endpoint.endpoint_name == "my-ft"
+    assert endpoint.url == _FakeModalCli.DEFAULT_URL
+
+
 def test_launch_stops_then_creates_when_recreate_if_existing(fake_modal_cli) -> None:
     cli = fake_modal_cli()
 
@@ -450,6 +530,7 @@ def test_launch_stops_then_creates_when_recreate_if_existing(fake_modal_cli) -> 
     assert cli.run_kwargs[0] == {
         "check": False,
         "capture_output": True,
+        "text": True,
         "timeout": 120,
     }
     assert cli.flag_value("--name") == "my-ft"
@@ -480,8 +561,9 @@ def test_recreate_stop_forwards_environment(fake_modal_cli) -> None:
     assert cli.flag_value("--env") == "dev"
 
 
-def test_recreate_continues_when_stop_fails(fake_modal_cli) -> None:
+def test_recreate_creates_when_stop_name_is_absent(fake_modal_cli) -> None:
     cli = fake_modal_cli(stop_returncode=1)
+    cli._stop_stderr = "Endpoint 'my-ft' not found in environment 'ajhinh-dev'."
 
     endpoint = Endpoint.launch(
         "Qwen/Qwen3-4B",
@@ -492,6 +574,70 @@ def test_recreate_continues_when_stop_fails(fake_modal_cli) -> None:
 
     assert [command[4] for command in cli.commands] == ["stop", "create"]
     assert endpoint.endpoint_name == "my-ft"
+    assert endpoint.url == _FakeModalCli.DEFAULT_URL
+
+
+def test_recreate_creates_when_stop_already_stopped(fake_modal_cli) -> None:
+    cli = fake_modal_cli(stop_returncode=1)
+    cli._stop_stderr = (
+        "Endpoint 'my-ft' in environment 'ajhinh-dev' is already stopped."
+    )
+
+    endpoint = Endpoint.launch(
+        "Qwen/Qwen3-4B",
+        endpoint_name="my-ft",
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+
+    assert [command[4] for command in cli.commands] == ["stop", "create"]
+    assert endpoint.endpoint_name == "my-ft"
+    assert endpoint.url == _FakeModalCli.DEFAULT_URL
+
+
+def test_recreate_raises_when_stop_app_is_absent(fake_modal_cli) -> None:
+    cli = fake_modal_cli(stop_returncode=1)
+    cli._stop_stderr = "App ap-test not found"
+
+    with pytest.raises(subprocess.CalledProcessError):
+        Endpoint.launch(
+            "Qwen/Qwen3-4B",
+            endpoint_name="my-ft",
+            unauthenticated=True,
+            recreate_if_existing=True,
+        )
+
+    assert [command[4] for command in cli.commands] == ["stop"]
+
+
+def test_recreate_raises_when_stop_fails(fake_modal_cli) -> None:
+    cli = fake_modal_cli(stop_returncode=1)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        Endpoint.launch(
+            "Qwen/Qwen3-4B",
+            endpoint_name="my-ft",
+            unauthenticated=True,
+            recreate_if_existing=True,
+        )
+
+    assert [command[4] for command in cli.commands] == ["stop"]
+
+
+def test_recreate_raises_when_stop_times_out(fake_modal_cli) -> None:
+    cli = fake_modal_cli(
+        stop_error=subprocess.TimeoutExpired(["modal", "endpoint", "stop"], 120)
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        Endpoint.launch(
+            "Qwen/Qwen3-4B",
+            endpoint_name="my-ft",
+            unauthenticated=True,
+            recreate_if_existing=True,
+        )
+
+    assert [command[4] for command in cli.commands] == ["stop"]
 
 
 def test_recreate_does_not_change_derived_name(fake_modal_cli) -> None:

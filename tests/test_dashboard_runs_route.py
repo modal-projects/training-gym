@@ -13,7 +13,10 @@ from modal_training_gym.common import reporting
 from modal_training_gym.common.framework import Framework
 from modal_training_gym.common.run import TrainingRun
 from modal_training_gym.common.step_timing import RoleTimingRecord
-from modal_training_gym.common.train_result import TrainResult
+from modal_training_gym.common.train_result import (
+    save_train_result_blob,
+    train_result_payload,
+)
 from modal_training_gym.common.training_rollout import TrainingRolloutResult
 from modal_training_gym.utils import metadata
 from modal_training_gym.utils.metadata import MetadataStore
@@ -47,12 +50,14 @@ def _save_records() -> None:
         updated_at=150,
         metadata={"group_id": "route-group"},
     ).save()
-    TrainResult(
-        app_name="route-app",
-        framework=Framework.SLIME,
-        training_run_id="run-route-1",
-        checkpoint_dir="/checkpoints/run-route-1",
-    ).save()
+    save_train_result_blob(
+        train_result_payload(
+            app_name="route-app",
+            framework=Framework.SLIME,
+            training_run_id="run-route-1",
+            checkpoint_dir="/checkpoints/run-route-1",
+        )
+    )
 
 
 def test_runs_route_returns_typed_joined_summaries(fake_volume, monkeypatch, tmp_path):
@@ -159,9 +164,7 @@ def test_runs_route_keeps_runs_when_train_result_store_fails(
     assert response.json()[0]["has_train_result"] is False
 
 
-def test_runs_route_filters_and_sorts_by_last_update(
-    fake_volume, monkeypatch, tmp_path
-):
+def test_runs_route_filters_and_sorts_by_creation(fake_volume, monkeypatch, tmp_path):
     _save_records()
     TrainingRun(
         training_run_id="run-route-2",
@@ -183,10 +186,105 @@ def test_runs_route_filters_and_sorts_by_last_update(
 
     assert filtered.status_code == 200
     assert [run["run_id"] for run in filtered.json()] == ["run-route-2"]
+    # ``since`` still selects on update time, but the list is ordered by
+    # creation: sorting by update time reshuffles the pages under a client that
+    # is paging through the list whenever a run reports progress.
     assert [run["run_id"] for run in all_runs.json()] == [
-        "run-route-2",
         "run-route-1",
+        "run-route-2",
     ]
+
+
+def test_runs_route_pages_and_omits_detail_only_fields(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_records()
+    TrainingRun(
+        training_run_id="run-route-2",
+        framework=Framework.MILES,
+        status="failed",
+        config={
+            "model": {"model_name": "other/model"},
+            "dataset": {"hf_repo": "other/data"},
+        },
+        created_at=50,
+        started_at=50,
+        updated_at=2_000_000_000,
+        metadata={"group_id": "other-group"},
+    ).save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        first = client.get("/api/runs?limit=1")
+        second = client.get("/api/runs?limit=1&offset=1")
+        searched = client.get("/api/runs?q=OTHER/MODEL")
+        faceted = client.get("/api/runs?status=failed")
+        detail = client.get("/api/runs/run-route-1")
+
+    assert [run["run_id"] for run in first.json()] == ["run-route-1"]
+    assert [run["run_id"] for run in second.json()] == ["run-route-2"]
+    assert [run["run_id"] for run in searched.json()] == ["run-route-2"]
+    assert [run["run_id"] for run in faceted.json()] == ["run-route-2"]
+    # The table renders none of these, and they are most of the payload.
+    assert not {"config", "step_times", "substep_times"} & set(first.json()[0])
+    assert detail.json()["config"]
+
+
+def test_runs_route_unions_repeated_facet_values(fake_volume, monkeypatch, tmp_path):
+    _save_records()
+    TrainingRun(
+        training_run_id="run-route-2",
+        framework=Framework.MILES,
+        config={"model": {"model_name": "other/model"}},
+        created_at=50,
+        started_at=50,
+        updated_at=200,
+    ).save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        both = client.get("/api/runs?recipe=slime&recipe=miles")
+
+    # ``recipe`` is a filter-chip facet as well as a filterable column, so a
+    # multi-select must not narrow to whichever repeated value is read first.
+    assert [run["run_id"] for run in both.json()] == ["run-route-1", "run-route-2"]
+
+
+def test_runs_counts_route_counts_every_run_and_the_current_query(
+    fake_volume, monkeypatch, tmp_path
+):
+    _save_records()
+    TrainingRun(
+        training_run_id="run-route-2",
+        framework=Framework.MILES,
+        status="failed",
+        config={"model": {"model_name": "other/model"}},
+        created_at=50,
+        started_at=50,
+        updated_at=2_000_000_000,
+    ).save()
+
+    with _client(monkeypatch, tmp_path) as client:
+        counts = client.get("/api/runs/counts").json()
+        failed = client.get("/api/runs/counts?status=failed").json()
+
+    assert counts["total"] == 2
+    assert counts["matching"] == 2
+    assert counts["status"]["failed"] == 1
+    assert counts["group"] == {"route-group": 1, "(no group)": 1}
+    # Bucket counts always describe every run — they are what the chips would
+    # select — while ``matching`` follows the current selection.
+    assert failed["status"] == counts["status"]
+    assert failed["matching"] == 1
+
+
+def test_unknown_api_path_is_a_json_404_not_the_spa(monkeypatch, tmp_path):
+    with _client(monkeypatch, tmp_path) as client:
+        missing = client.get("/api/nope")
+        spa = client.get("/nope")
+
+    assert missing.status_code == 404
+    assert missing.headers["content-type"].startswith("application/json")
+    assert spa.status_code == 200
+    assert spa.text == "ok"
 
 
 def test_apple_touch_icon_is_served_as_png(monkeypatch, tmp_path):
@@ -478,3 +576,33 @@ def test_persisted_non_final_timing_survives_stale_listing(
     assert writes
     assert second.status_code == 200
     assert second.json()["0"]["roles"]["driver"]["lane_start_unix_s"] == 200.0
+
+
+def test_spa_html_revalidates_and_assets_are_immutable(monkeypatch, tmp_path):
+    """A deploy must never leave a browser holding HTML for a deleted bundle.
+
+    Vite's bundle names are content-hashed, so the previous deploy's
+    ``/assets/index-<hash>.js`` is gone the moment a new image ships. If a
+    cached ``index.html`` were served without revalidating, it would keep
+    requesting that bundle and the page would fail to boot on a 404.
+    """
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<html></html>")
+    (static / "assets" / "index-abc123.js").write_text("console.log(1)")
+    monkeypatch.setattr(_dashboard, "STATIC_DIR", str(static))
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+
+    with TestClient(_dashboard.fastapi_app.local()) as client:
+        page = client.get("/training/some-run")
+        assert page.status_code == 200
+        assert "no-cache" in page.headers["cache-control"]
+
+        asset = client.get("/assets/index-abc123.js")
+        assert asset.status_code == 200
+        assert "immutable" in asset.headers["cache-control"]
+
+        # A bundle from an older deploy is a plain 404, not the SPA fallback:
+        # the browser must see the failure rather than parse HTML as JavaScript.
+        missing = client.get("/assets/index-gone.js")
+        assert missing.status_code == 404

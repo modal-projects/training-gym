@@ -10,6 +10,81 @@ const isCliIndex = slug === 'reference/cli';
 
 <script is:inline>
   (() => {
+    const ANCHOR_LINK = '.sl-anchor-link';
+    const copiedLinks = new WeakMap();
+
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('execCommand copy failed');
+    }
+
+    async function writeClipboard(text) {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          return;
+        }
+      } catch {}
+      fallbackCopy(text);
+    }
+
+    function markCopied(link, copied) {
+      const icon = link.querySelector('.sl-anchor-icon');
+      if (icon instanceof HTMLElement) icon.style.visibility = copied ? 'hidden' : '';
+      let check = link.querySelector('.tg-anchor-copied');
+      if (!copied) {
+        check?.remove();
+        return;
+      }
+      if (!check) {
+        check = document.createElement('span');
+        check.className = 'tg-anchor-copied';
+        check.setAttribute('aria-hidden', 'true');
+        check.style.cssText =
+          'position:absolute;inset:0;display:inline-flex;align-items:center;justify-content:center';
+        check.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+        link.prepend(check);
+      }
+    }
+
+    document.addEventListener('click', async (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+        return;
+      if (!(event.target instanceof Element)) return;
+      const link = event.target.closest(ANCHOR_LINK);
+      if (!(link instanceof HTMLAnchorElement) || !link.hash) return;
+      event.preventDefault();
+      const url = new URL(window.location.href);
+      url.hash = link.hash;
+      history.pushState(null, '', url);
+      try {
+        await writeClipboard(url.toString());
+      } catch {
+        return;
+      }
+      clearTimeout(copiedLinks.get(link));
+      markCopied(link, true);
+      copiedLinks.set(
+        link,
+        setTimeout(() => {
+          markCopied(link, false);
+          copiedLinks.delete(link);
+        }, 1600),
+      );
+    });
+  })();
+</script>
+
+<script is:inline>
+  (() => {
     const TOC_LINK = '.tg-toc a';
 
     function linkTarget(link) {
@@ -65,3 +140,9 @@ const isCliIndex = slug === 'reference/cli';
     window.addEventListener('hashchange', syncCurrent);
   })();
 </script>
+
+<style>
+  .sl-anchor-link {
+    position: relative;
+  }
+</style>

@@ -10,6 +10,7 @@ Test it out with:
 from __future__ import annotations
 
 import os
+import runpy
 import time
 import traceback
 from dataclasses import asdict
@@ -19,7 +20,7 @@ from pathlib import Path
 import modal
 
 from modal_training_gym.common.models.validation import _ValidationConfig
-from modal_training_gym.common.run import TrainingRun
+from modal_training_gym.common.run import TrainingRun, TrainingRunStatus
 from scripts.validate_model_configs import ValidationResult, run_base_training
 from synthetic_monitoring.chart import RunPoint, render_timing_history_chart
 
@@ -29,6 +30,7 @@ CLEANUP_GRACE_S = 5 * 60
 LAUNCH_TIMEOUT_S = PROBE_TIMEOUT_S + CLEANUP_GRACE_S + 30 * 60
 MODAL_ENV = "training-gym"
 HISTORY_DICT_NAME = "gym-synmon-timing-baselines"
+QUICKSTART_NAME = "quickstart"
 
 probe_image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -247,6 +249,43 @@ def _post_report(rows: list[dict]) -> None:
     timeout=PROBE_TIMEOUT_S + CLEANUP_GRACE_S,
 )
 def monitor(model: str = "", num_steps: int = 1) -> dict:
+    if model == QUICKSTART_NAME:
+        print(f"synmon: {QUICKSTART_NAME!r}")
+        run: TrainingRun | None = None
+        try:
+            run = runpy.run_module("scripts.quickstart")["run"]
+            completed = run.result(timeout=PROBE_TIMEOUT_S)
+            training_run = TrainingRun.from_id(completed.training_run_id)
+            url = training_run.modal_app_url or _lookup_app_url(
+                training_run.training_run_id
+            )
+            ok = training_run.status == TrainingRunStatus.COMPLETED
+            point = RunPoint(
+                ts=time.time(),
+                timings={},
+                training_run_id=training_run.training_run_id,
+                total_duration_s=float(training_run.duration_seconds or 0),
+                status="success" if ok else "failed",
+                modal_app_url=url,
+            )
+            error = None if ok else f"quickstart failed: {training_run.status.value}"
+            return _row(QUICKSTART_NAME, point, _record(QUICKSTART_NAME, point), error)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            print(f"error: probe failed for {QUICKSTART_NAME}: {error}")
+            if run is not None:
+                run.close()
+            url = _lookup_app_url(run.training_run_id) if run else None
+            point = RunPoint(
+                ts=time.time(),
+                timings={},
+                training_run_id=getattr(run, "training_run_id", "") or "",
+                total_duration_s=float(getattr(run, "duration_seconds", 0) or 0),
+                status="failed",
+                modal_app_url=url,
+            )
+            return _row(QUICKSTART_NAME, point, _record(QUICKSTART_NAME, point), error)
+
     selected = _ValidationConfig.find(model).name
     print(f"synmon: model={selected!r} num_steps={num_steps}")
     result: ValidationResult | None = None
@@ -287,11 +326,12 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
     secrets=[slack_secret],
 )
 def launch_weekly(model: str = "", num_steps: int = 1) -> list[dict]:
-    names = (
-        [_ValidationConfig.find(model).name]
-        if model
-        else [config.name for config in _ValidationConfig.select(pr_only=True)]
-    )
+    if not model:
+        names = [c.name for c in _ValidationConfig.select()] + [QUICKSTART_NAME]
+    elif model == QUICKSTART_NAME:
+        names = [QUICKSTART_NAME]
+    else:
+        names = [_ValidationConfig.find(model).name]
     if not names:
         raise RuntimeError("no validatable models registered")
 

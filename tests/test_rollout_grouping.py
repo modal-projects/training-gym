@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.common.training_rollout import (
     TrainingRolloutResult,
@@ -152,6 +154,42 @@ def test_episode_count_reads_as_unknown_for_records_written_before_it_existed():
     assert summary.episode_count is None
 
 
+def test_reward_stats_weight_each_episode_once():
+    samples = [
+        TrainingRolloutSample(score=reward, rollout_index=index)
+        for index, (reward, turns) in enumerate(EPISODES)
+        for _ in range(turns)
+    ]
+    rollout = _rollout(samples)
+
+    assert rollout.reward_stats == {
+        "count": 4,
+        "mean": 1.5,
+        "min": 0.0,
+        "max": 3.0,
+        "p50": 1.5,
+        "p90": pytest.approx(2.7),
+        "p99": pytest.approx(2.97),
+    }
+    summary = TrainingRolloutSummary.model_validate(rollout.to_summary())
+    assert summary.reward_stats == rollout.reward_stats
+
+
+def test_reward_stats_absent_for_empty_rollouts_and_old_summaries():
+    assert _rollout([]).reward_stats is None
+    assert "reward_stats" not in _rollout([]).to_summary()
+    summary = TrainingRolloutSummary.model_validate(
+        {
+            "training_run_id": "t",
+            "rollout_id": 0,
+            "created_at": 0,
+            "total": 0,
+            "mean": 0,
+        }
+    )
+    assert summary.reward_stats is None
+
+
 def test_mean_unchanged_for_one_sample_per_rollout():
     samples = [TrainingRolloutSample(score=float(i), rollout_index=i) for i in range(4)]
 
@@ -221,6 +259,9 @@ def test_tag_stats_weight_each_rollout_once():
         "mean": 3.0,
         "min": 1.0,
         "max": 5.0,
+        "p50": 3.0,
+        "p90": pytest.approx(4.6),
+        "p99": pytest.approx(4.96),
     }
 
 
@@ -236,6 +277,9 @@ def test_tag_stats_average_a_tag_within_its_rollout():
         "mean": 2.5,
         "min": 1.0,
         "max": 4.0,
+        "p50": 2.5,
+        "p90": pytest.approx(3.7),
+        "p99": pytest.approx(3.97),
     }
 
 
@@ -251,6 +295,9 @@ def test_tag_stats_count_only_the_rollouts_that_reported_the_tag():
         "mean": 2.0,
         "min": 2.0,
         "max": 2.0,
+        "p50": 2.0,
+        "p90": pytest.approx(2.0),
+        "p99": pytest.approx(2.0),
     }
 
 

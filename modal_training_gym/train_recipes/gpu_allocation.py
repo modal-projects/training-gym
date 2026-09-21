@@ -7,6 +7,8 @@ from typing import Any
 
 from modal_training_gym.common.errors import GpuAllocationError
 
+_MAX_GPUS_PER_CONTAINER = {"A10": 4}
+
 
 @dataclass(frozen=True)
 class GpuAllocation:
@@ -35,6 +37,14 @@ class GpuAllocation:
         return "GPU allocation: " + ", ".join(parts)
 
 
+def _normalize_gpu_type(gpu_type: str | None) -> str:
+    return (gpu_type or "").split(":")[0].strip().rstrip("!+").upper()
+
+
+def _max_gpus_per_container(gpu_type: str | None) -> int:
+    return _MAX_GPUS_PER_CONTAINER.get(_normalize_gpu_type(gpu_type), 8)
+
+
 def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
     gpus_per_node = _positive_int_field(config, "actor_num_gpus_per_node")
     actor_nodes = _positive_int_field(config, "actor_num_nodes")
@@ -55,12 +65,17 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
     )
 
     total_gpus = actor_gpus + critic_gpus + rollout_gpus
-    if total_gpus % gpus_per_node != 0:
+    max_gpus = _max_gpus_per_container(getattr(config, "gpu_type", None))
+    if actor_nodes == 1 and total_gpus <= max_gpus:
+        gpus_per_node = total_gpus
+        total_nodes = 1
+    elif total_gpus % gpus_per_node != 0:
         raise GpuAllocationError(
             f"total_gpus={total_gpus} is not a multiple of gpus_per_node={gpus_per_node}. "
             "Adjust actor_num_nodes, rollout_num_gpus, or actor_num_gpus_per_node."
         )
-    total_nodes = total_gpus // gpus_per_node
+    else:
+        total_nodes = total_gpus // gpus_per_node
     rollout_engines = rollout_gpus // rollout_num_gpus_per_engine if rollout_gpus else 0
 
     return GpuAllocation(
@@ -73,6 +88,26 @@ def resolve_gpu_allocation(config: Any, *, warn: bool = True) -> GpuAllocation:
         rollout_num_gpus_per_engine=rollout_num_gpus_per_engine,
         rollout_engines=rollout_engines,
         colocate=colocate,
+    )
+
+
+def validate_multi_node_gpu_count(
+    allocation: GpuAllocation, gpu_type: str | None = None
+) -> None:
+    max_gpus = _max_gpus_per_container(gpu_type)
+    if allocation.gpus_per_node > max_gpus:
+        raise GpuAllocationError(
+            f"gpus_per_node={allocation.gpus_per_node} exceeds the "
+            f"{max_gpus} GPU container limit."
+        )
+    if allocation.total_nodes <= 1:
+        return
+    if allocation.gpus_per_node == max_gpus:
+        return
+    raise GpuAllocationError(
+        f"Multi-node functions must use {max_gpus} GPUs per node; "
+        f"requested {allocation.gpus_per_node}. Use actor_num_nodes=1 to pack "
+        f"one node, or actor_num_gpus_per_node={max_gpus}."
     )
 
 

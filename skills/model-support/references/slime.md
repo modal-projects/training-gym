@@ -59,7 +59,7 @@ Slime by default use mbridge (`megatron_to_hf_mode=""`) instead of bridge (`mega
 
 ## How the recipe maps to CLI flags (add flags without touching gym code)
 
-`SlimeRecipe.cli_args` emits `--<field-name-with-dashes> <value>` for **every dataclass field** not listed in `_SLIME_SKIP` (recipe.py). So the way to add an arbitrary slime/sglang flag is simply to **declare it as a field on your recipe subclass** — no edits to `recipe.py` or the launcher. `glm_4_7.py` and `qwen3_6_35b_long_context.py` do exactly this for their `sglang_*` and perf flags. Rules `cli_args` follows:
+`SlimeRecipe.cli_args` emits `--<field-name-with-dashes> <value>` for **every dataclass field** not listed in `_SLIME_SKIP` (recipe.py). So the way to add an arbitrary slime/sglang flag is simply to **declare it as a field on your recipe subclass** — no edits to `recipe.py` or the launcher. `glm_4_7.py` does exactly this for its `sglang_*` and perf flags. Rules `cli_args` follows:
 - `True` → bare flag (`--foo`); `False` / `None` / `""` → omitted entirely. So default an unwanted flag to `None`/`False`/`""`.
 - `list` → `--foo a b c`.
 - Fields in `YAML_CONFIG_FIELDS` (`eval_config`, `extra_config`, `sglang_config`) may be passed as a **dict** — `prepare_slime_config` materializes it to a YAML file at runtime and rewrites the value to the path (this is how SGLang PD-disaggregation `server_groups` are supplied). `JSON_CONFIG_FIELDS` (`train_env_vars`, `apply_chat_template_kwargs`, `multimodal_keys`) are passed as JSON.

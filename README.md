@@ -7,7 +7,7 @@ The library takes care of infrastructure concerns such as cluster topology, Ray/
 To get started, you can go through the [Quickstart](#quickstart) section below, or paste the prompt below into your favorite agent:
 
 ```txt
-Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Given a budget of 1 B300, train Qwen3.8 27B to correctly solve problems taken from agentica-org/DeepCoder-Preview-Dataset with xhigh reasoning and a length penalty to limit the number of reasoning tokens."
+Install the `training-gym` library. Then, install the skill bundle into the local project with `training-gym skills install`. Finally, tell the user that they can ask you to do something like: "Walk through tutorials/rl_basics.py and train Qwen3.5-4B to write 5-7-5 haikus from statworx/haiku."
 ```
 
 ## Quickstart
@@ -57,47 +57,49 @@ training-gym skills install
 
 Then, it's as easy as:
 
+<!-- BEGIN QUICKSTART -->
 ```python
+import re
+
 from modal_training_gym import (
     HuggingFaceDataset,
-    Qwen3_4B,
-    Qwen3_4B_Recipe,
+    Qwen3_5_4B,
+    Qwen3_5_4B_Recipe,
     TrainConfig,
 )
 
+model = Qwen3_5_4B()
 
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
+
+async def gsm8k_rm(args, sample, **kwargs) -> float:
+    text = model.parse_response(sample.response or "").content
+    boxed = re.findall(r"\\boxed\{([^}]+)\}", text)
+    pred = boxed[-1] if boxed else (re.findall(r"-?[\d,]+(?:\.\d+)?", text) or [""])[-1]
+    try:
+        return float(float(pred.replace(",", "")) == float(sample.label))
+    except ValueError:
+        return 0.0
 
 
 config = TrainConfig(
-    model=Qwen3_4B(),
-    dataset=MathDataset(n_rows=120),
-    recipe=Qwen3_4B_Recipe(
-        gpu_type="H100",
-        actor_num_nodes=1,
-        actor_num_gpus_per_node=8,
-        tensor_model_parallel_size=1,
-        sequence_parallel=False,
-        rollout_num_gpus=8,
-        rollout_num_gpus_per_engine=1,
-        colocate=True,
-        num_rollout=1,
-        n_samples_per_prompt=4,
-        rollout_batch_size=8,
-        rollout_max_response_len=2048,
-        max_tokens_per_gpu=4096,
-        sglang_mem_fraction_static=0.6,
-        rm_type="deepscaler",
+    model=model,
+    dataset=HuggingFaceDataset(
+        hf_repo="skrishna/gsm8k_only_answer",
+        hf_split="train[:120]",
+        input_column="text",
+        output_column="label",
+        input_format="text",
+    ),
+    recipe=Qwen3_5_4B_Recipe(
+        custom_rm_function=gsm8k_rm,
     ),
 )
 run = config.launch()
 print(run.training_run_id)
 ```
+<!-- END QUICKSTART -->
+
+For a step-by-step walkthrough, see the [Getting started tutorial](https://gym.modal.dev/tutorials/rl_basics).
 
 ## Supported models
 
@@ -106,6 +108,7 @@ print(run.training_run_id)
 
 | Family | Models |
 |---|---|
+| DeepSeek | <ul><li>[DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)</li></ul> |
 | GLM | <ul><li>[GLM-4.7](https://huggingface.co/zai-org/GLM-4.7)</li></ul> |
 | Gemma | <ul><li>[gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it)</li></ul> |
 | Inkling | <ul><li>[Inkling-Small](https://huggingface.co/thinkingmachines/Inkling-Small)</li></ul> |
@@ -115,8 +118,3 @@ print(run.training_run_id)
 | Qwen3.6 | <ul><li>[Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B)</li><li>[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)</li></ul> |
 | Qwen3.8 | <ul><li>[Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B)</li></ul> |
 <!-- END MODELS LIST -->
-
-## Multi-node access
-
-> [!IMPORTANT]
-> Single-node training is open to everyone. Multi-node clusters are still in Beta and are required for larger models. [Contact us on Slack](https://modal.com/slack) for access.

@@ -84,11 +84,21 @@ def metric_secrets(metric: MetricConfig) -> list[Any]:
 
 
 def apply_metric_image(image: Any, metric: MetricConfig | None) -> Any:
-    if metric is not None and metric.provider == "trackio":
+    """Install the provider package and the ``.pth`` that mirrors metrics to
+    the dashboard (inert unless ``TRAINING_GYM_METRIC_PROVIDER`` is set)."""
+    if metric is None:
+        return image
+    from modal_training_gym.common.metric_mirror import pth_install_command
+
+    if metric.provider == "trackio":
         from modal_training_gym.common.trackio import apply_trackio_image
 
-        return apply_trackio_image(image, metric)
-    return image
+        image = apply_trackio_image(image, metric)
+    if metric.provider == "wandb":
+        from modal_training_gym.common.wandb import apply_wandb_image
+
+        image = apply_wandb_image(image)
+    return image.run_commands(pth_install_command())
 
 
 def preflight_metric(metric: MetricConfig | None) -> str:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import shlex
 import sys
 import types
 import uuid
@@ -15,6 +14,7 @@ from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.metric_mirror import mirror_log
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -22,48 +22,22 @@ _DEFAULT_TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
-_PTH_LINE = (
-    "import os; os.environ.get('TRAINING_GYM_METRIC_PROVIDER') != 'trackio' "
-    "or __import__('modal_training_gym.common.trackio', "
-    "fromlist=['install_wandb_shim']).install_wandb_shim()\n"
-)
 
 
 @dataclass
 class TrackioConfig(MetricConfig):
     """Trackio logging configuration shared across all frameworks.
 
-    Trackio can log to a Hugging Face Space or a self-hosted server. Training
-    images install Trackio automatically and adapt the W&B calls made by the
-    underlying framework.
-
-    ## Fields
-
-    project : str
-        Trackio project name. Default ``""`` (uses ``"training-gym"``).
-    group : str
-        Group tag for related runs. Default ``""``.
-    exp_name : str
-        Run display name. Default ``""``.
-    disable_random_suffix : bool
-        Whether the framework should preserve the configured group name.
-        Default ``True``.
-    space_id : str
-        Hugging Face Space ID, such as ``"owner/trackio"``. Optional.
-    server_url : str
-        URL of a self-hosted Trackio server. Optional.
-    dashboard_url : str
-        Explicit dashboard URL. Optional; otherwise derived from ``space_id``
-        or ``server_url``.
-    bucket_id : str
-        Hugging Face Bucket used by the Trackio Space. Optional.
-    modal_secret_name : str
-        Modal Secret containing ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
-        The standard optional ``"huggingface-secret"`` is used by default.
-    TRACKIO_PACKAGE_VERSION : str
-        Trackio release installed in the training image, and in the server
-        deployed by ``deploy_to_modal``. Defaults to the version this release
-        of Training Gym is tested against; bump it to pick up a newer Trackio.
+    Attributes:
+        space_id: Optional Hugging Face Space id such as ``owner/trackio``.
+        server_url: Optional self-hosted Trackio server URL. Leave empty to use
+            hosted Trackio.
+        dashboard_url: Dashboard URL. Derived from ``space_id`` or ``server_url``
+            when empty.
+        bucket_id: Hugging Face Bucket used by the Trackio Space.
+        modal_secret_name: Modal Secret with ``HF_TOKEN`` or ``TRACKIO_WRITE_TOKEN``.
+        TRACKIO_PACKAGE_VERSION: Trackio release installed in the training image
+            and by ``deploy_to_modal``.
     """
 
     project: str = ""
@@ -273,23 +247,34 @@ def trackio_secrets(config: TrackioConfig) -> list[Any]:
 
 
 def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
-    install_code = (
-        "import pathlib, site; "
-        "pathlib.Path(site.getsitepackages()[0], "
-        f"'_training_gym_trackio.pth').write_text({_PTH_LINE!r})"
-    )
-    return image.uv_pip_install(
-        f"trackio=={config.TRACKIO_PACKAGE_VERSION}"
-    ).run_commands(f"python3 -c {shlex.quote(install_code)}")
+    return image.uv_pip_install(f"trackio=={config.TRACKIO_PACKAGE_VERSION}")
+
+
+class TrackioLookupUnknown(Exception):
+    """Modal lookup of the Trackio app failed before not-found could be observed."""
+
+
+def lookup_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
+    """URL of the deployed Trackio server, ``None`` if it is not deployed.
+
+    Raises ``TrackioLookupUnknown`` when the lookup fails for any other reason.
+    """
+    import modal
+    from modal.exception import NotFoundError
+
+    try:
+        return modal.Function.from_name(app_name, "dashboard").get_web_url()
+    except NotFoundError:
+        return None
+    except Exception as exc:
+        raise TrackioLookupUnknown from exc
 
 
 def deployed_trackio_url(app_name: str = _DEFAULT_MODAL_APP_NAME) -> str | None:
     """URL of an already-deployed Trackio server on Modal, if there is one."""
-    import modal
-
     try:
-        return modal.Function.from_name(app_name, "dashboard").get_web_url()
-    except Exception:
+        return lookup_trackio_url(app_name)
+    except TrackioLookupUnknown:
         return None
 
 
@@ -437,6 +422,7 @@ def install_wandb_shim() -> None:
     def log(
         data: dict[str, Any],
         step: int | None = None,
+        commit: bool | None = None,
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
@@ -445,8 +431,11 @@ def install_wandb_shim() -> None:
         # go through the run object directly.
         run = shim.run
         if run is None:
-            return trackio.log(data, step=step)
-        return run.log(metrics=data, step=step)
+            result = trackio.log(data, step=step)
+        else:
+            result = run.log(metrics=data, step=step)
+        mirror_log(data, step=step, commit=commit)
+        return result
 
     def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:

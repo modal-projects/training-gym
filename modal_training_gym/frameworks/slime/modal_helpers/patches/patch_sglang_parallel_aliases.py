@@ -12,6 +12,17 @@ from pathlib import Path
 
 
 MARKER = "PATCHED_SGLANG_PARALLEL_SIZE_ALIASES"
+UPSTREAM_ALIASES = """\
+    for short, long in (
+        ("sglang_dp_size", "sglang_data_parallel_size"),
+        ("sglang_pp_size", "sglang_pipeline_parallel_size"),
+        ("sglang_ep_size", "sglang_expert_parallel_size"),
+    ):
+        if hasattr(args, long):
+            setattr(args, short, getattr(args, long))
+        else:
+            setattr(args, long, getattr(args, short))
+"""
 ANCHOR = """\
 def validate_args(args):
     args.sglang_dp_size = args.sglang_data_parallel_size
@@ -32,6 +43,9 @@ def validate_args(args):
 
 def _patch_file(path: Path) -> None:
     source = path.read_text()
+    if UPSTREAM_ALIASES in source:
+        print(f"{path.name} already supports SGLang parallel-size aliases upstream")
+        return
     if MARKER in source:
         print(f"{path.name} already patched for SGLang parallel-size aliases")
         return

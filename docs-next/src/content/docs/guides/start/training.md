@@ -31,16 +31,21 @@ Note that you can always access runs by their ID:
 run = TrainingRun.from_id("bristled-pine-a7c3e91d4b2")
 ```
 
-From there, we get the run's result after it has completed:
+While the run is in-progress, you can poll for the latest checkpoint:
 
 ```python
-result = run.result()
-```
+import time
 
-Then, get the latest checkpoint:
-
-```python
-checkpoint = result.checkpoints()[-1]
+with config.launch() as run:
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+        if done:
+            break
+        time.sleep(30)
 ```
 
 Now, we could do offline evals:
@@ -64,13 +69,12 @@ def run_eval(deployment, max_concurrency: int = 2) -> float:
         prompt = example["prompt"][0]["content"]
         msg = deployment.chat(
             [{"role": "user", "content": prompt}],
-            chat_template_kwargs={"enable_thinking": True},
         )
         response = msg.get("content") or msg.get("reasoning_content") or ""
         return score(response, example["label"])
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        scores = list(executor.map(_score_one, eval_dataset.load()))
+        scores = list(executor.map(_score_one, eval_dataset.rows()))
     percent_correct = (
         len([s for s in scores if s == 1]) / len(scores) if scores else float("nan")
     )
@@ -87,12 +91,12 @@ Or train the model further with the existing checkpoint as a starting point:
 config = TrainConfig(
     model=model,
     dataset=dataset,
-    checkpoint=checkpoint,
+    resume_from_checkpoint=checkpoint,
     recipe=recipe,
 )
 ```
 
-Why might you want to continue training the model? As an example, you can implement curriculum learning by increasing the difficulty of the data and reward function over time:
+Why might you want to continue training the model? As an example, you can implement curriculum learning by increasing the difficulty of the data and reward function over time. The new run starts from the trained weights with an untrained optimizer:
 
 ```python
 simple_config = TrainConfig(
@@ -101,18 +105,32 @@ simple_config = TrainConfig(
     recipe=simple_recipe,
 )
 
-simple_run = simple_config.launch()
-simple_result = simple_run.result()
-simple_checkpoint = simple_result.latest_checkpoint()
+with simple_config.launch() as simple_run:
+    simple_checkpoint = None
+    while True:
+        done = simple_run.done()
+        latest = simple_run.latest_checkpoint()
+        if latest is not None and latest != simple_checkpoint:
+            simple_checkpoint = latest
+        if done:
+            break
+        time.sleep(30)
 
 complex_config = TrainConfig(
     model=model,
-    checkpoint=simple_checkpoint,
     dataset=complex_dataset,
+    resume_from_checkpoint=simple_checkpoint,
     recipe=complex_recipe,
 )
 
-complex_run = complex_config.launch()
-complex_result = complex_run.result()
-complex_checkpoint = complex_result.latest_checkpoint()
+with complex_config.launch() as complex_run:
+    complex_checkpoint = None
+    while True:
+        done = complex_run.done()
+        latest = complex_run.latest_checkpoint()
+        if latest is not None and latest != complex_checkpoint:
+            complex_checkpoint = latest
+        if done:
+            break
+        time.sleep(30)
 ```

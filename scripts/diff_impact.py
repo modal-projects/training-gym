@@ -136,15 +136,12 @@ def _model_index() -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]
     the model's ``ModelConfig`` subclass and the recipe class its framework
     returns from ``get_base_recipe`` gate that model, so a change to either
     re-validates it.
-
-    Only the PR-matrix set is indexed. A model registered with
-    ``run_on_pr=False`` must never reach a PR matrix, so no diff can select it.
     """
     from modal_training_gym.common.models.validation import _ValidationConfig
 
     class_to_models: dict[str, set[str]] = defaultdict(set)
     framework_to_models: dict[str, set[str]] = defaultdict(set)
-    for config in _ValidationConfig.select(pr_only=True):
+    for config in _ValidationConfig.select():
         class_to_models[config.model_config.__name__].add(config.name)
         framework_to_models[config.framework.value].add(config.name)
         recipe = _base_recipe_for(config.framework, config.model_config())
@@ -235,6 +232,23 @@ def _classes_for_path(path: Path) -> set[str]:
     return set()
 
 
+def _tutorial_slug_for_path(
+    path: Path,
+    tutorials: dict[str, TutorialEntry],
+) -> str | None:
+    if not path.is_relative_to(TUTORIAL_SRC_ROOT):
+        return None
+    for slug, tutorial in tutorials.items():
+        owner = (
+            tutorial.path
+            if tutorial.path.parent == TUTORIAL_SRC_ROOT
+            else tutorial.path.parent
+        )
+        if path == owner or path.is_relative_to(owner):
+            return slug
+    return None
+
+
 def analyze_diff(diff_text: str) -> ImpactReport:
     tutorials = _load_tutorial_index()
     changed_paths = _paths_from_diff(diff_text)
@@ -244,9 +258,8 @@ def analyze_diff(diff_text: str) -> ImpactReport:
 
     for path in changed_paths:
         if path.is_relative_to(TUTORIAL_SRC_ROOT):
-            slug = path.stem
-            info = tutorials.get(slug)
-            if info is not None:
+            slug = _tutorial_slug_for_path(path, tutorials)
+            if slug is not None:
                 affected_tutorial_reasons[slug].add("tutorial source changed")
             continue
 

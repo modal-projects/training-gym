@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
+from modal_training_gym.common.advantage_distribution import quantile
 from modal_training_gym.common.coerce import optional_int, safe_int
 from modal_training_gym.common.sample import Sample
 from modal_training_gym.utils.metadata import (
@@ -102,19 +103,52 @@ def _clean_prompt(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+_CHAT_TURN_RE = re.compile(r"<\|im_start\|>(\w+)\n")
+_TOOL_RESPONSE_RE = re.compile(
+    r"^\s*<tool_response>\s*(.*?)\s*</tool_response>\s*$", re.DOTALL
+)
+
+
+def _transcript_messages(text: str) -> list[dict[str, str]] | None:
+    if "<|im_start|>" not in text:
+        return None
+    pieces = _CHAT_TURN_RE.split(text)
+    turns = [("assistant", pieces[0]), *zip(pieces[1::2], pieces[2::2])]
+    messages: list[dict[str, str]] = []
+    for role, body in turns:
+        body = body.replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+        if not body:
+            continue
+        if role == "user" and (match := _TOOL_RESPONSE_RE.match(body)):
+            role, body = "tool", match.group(1)
+        messages.append({"role": role, "content": body})
+    return messages if len(messages) > 1 else None
+
+
 def _apply_parsed(rows: object) -> None:
     if not isinstance(rows, list):
         return
     for row in rows:
         if not isinstance(row, dict):
             continue
+        raw = row.get("response")
+        transcript = _transcript_messages(raw) if isinstance(raw, str) else None
+        if transcript:
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                row["metadata"] = metadata
+            metadata.setdefault("trajectory_messages", transcript)
         parsed = row.get("parsed_response")
         if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
-            raw = row.get("response")
             if isinstance(raw, str):
                 row["raw_response"] = raw
-            row["response"] = parsed.get("content") or ""
-            if parsed.get("thinking"):
+            row["response"] = (
+                raw
+                if transcript and isinstance(raw, str)
+                else parsed.get("content") or ""
+            )
+            if parsed.get("thinking") and not transcript:
                 row["thinking"] = parsed["thinking"]
             if parsed.get("tool_calls"):
                 row["tool_calls"] = parsed["tool_calls"]
@@ -138,6 +172,20 @@ def _numeric_tags(samples: list[TrainingRolloutSample]) -> dict[str, list[float]
     return values_by_tag
 
 
+_SUMMARY_PERCENTILES: dict[str, float] = {"p50": 0.5, "p90": 0.9, "p99": 0.99}
+
+
+def _value_stats(values: list[float]) -> dict[str, Any]:
+    ordered = sorted(values)
+    return {
+        "count": len(ordered),
+        "mean": sum(ordered) / len(ordered),
+        "min": ordered[0],
+        "max": ordered[-1],
+        **{name: quantile(ordered, q) for name, q in _SUMMARY_PERCENTILES.items()},
+    }
+
+
 class TrainingRolloutSummary(BaseModel):
     """Lightweight rollout data returned by the run-rollouts list endpoint."""
 
@@ -147,6 +195,7 @@ class TrainingRolloutSummary(BaseModel):
     total: int
     episode_count: int | None = None
     mean: float
+    reward_stats: dict[str, Any] | None = None
     export_size_bytes: int | None = None
     rollout_time: float | None = None
     error_summary: dict[str, Any] | None = None
@@ -174,6 +223,11 @@ class TrainingRolloutResult(BaseModel):
             groups.setdefault(key, []).append(sample)
         return list(groups.values())
 
+    def _episode_rewards(self) -> list[float]:
+        return [
+            sum(s.score for s in group) / len(group) for group in self._rollout_groups()
+        ]
+
     @property
     def total(self) -> int:
         return len(self.samples)
@@ -184,12 +238,15 @@ class TrainingRolloutResult(BaseModel):
 
     @property
     def mean(self) -> float:
-        groups = self._rollout_groups()
-        if not groups:
+        rewards = self._episode_rewards()
+        if not rewards:
             return 0.0
-        return sum(sum(s.score for s in group) / len(group) for group in groups) / len(
-            groups
-        )
+        return sum(rewards) / len(rewards)
+
+    @property
+    def reward_stats(self) -> dict[str, Any] | None:
+        rewards = self._episode_rewards()
+        return _value_stats(rewards) if rewards else None
 
     @property
     def storage_key(self) -> str:
@@ -250,15 +307,7 @@ class TrainingRolloutResult(BaseModel):
             for tag, values in _numeric_tags(group).items():
                 values_by_tag.setdefault(tag, []).append(sum(values) / len(values))
 
-        return {
-            tag: {
-                "count": len(values),
-                "mean": sum(values) / len(values),
-                "min": min(values),
-                "max": max(values),
-            }
-            for tag, values in values_by_tag.items()
-        }
+        return {tag: _value_stats(values) for tag, values in values_by_tag.items()}
 
     def to_summary(self) -> dict[str, Any]:
         summary: dict[str, Any] = {
@@ -269,6 +318,9 @@ class TrainingRolloutResult(BaseModel):
             "episode_count": self.episode_count,
             "mean": self.mean,
         }
+        reward_stats = self.reward_stats
+        if reward_stats:
+            summary["reward_stats"] = reward_stats
         if self.rollout_time is not None:
             summary["rollout_time"] = self.rollout_time
         err = self.error_summary

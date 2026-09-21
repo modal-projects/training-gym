@@ -8,12 +8,17 @@
 # and error-prone if not properly guided or documented. This is made a first-class
 # operation in the Gym so you can move faster and spend less.
 
+import re
+
+from datasets import load_dataset
+
 from modal_training_gym import (
-    HuggingFaceDataset,
+    DatasetConfig,
     Qwen3_5_4B,
     Qwen3_5_4B_Recipe,
     TrainConfig,
     TrainingGroup,
+    TrainingRun,
 )
 
 # ## Define the training base
@@ -24,26 +29,51 @@ from modal_training_gym import (
 
 model = Qwen3_5_4B()
 
-class MathDataset(HuggingFaceDataset):
-    hf_repo = "zhuzilin/dapo-math-17k"
-    input_key = "prompt"
-    label_key = "label"
-    output_format = "jsonl"
-    apply_chat_template = True
-    always_prepare = True
 
-train_dataset = MathDataset(hf_split="train[:2000]")
+def _letter_answer(row) -> bool:
+    return bool(re.fullmatch(r"[A-J]", str(row["expected_answer"]).strip().upper()))
+
+
+class OpenScienceDataset(DatasetConfig):
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        ds = load_dataset(
+            "nvidia/OpenScienceReasoning-2", split="train", streaming=True
+        )
+        kept = 0
+        for row in ds:
+            if not _letter_answer(row):
+                continue
+            yield {
+                "messages": [{"role": "user", "content": row["input"]}],
+                "label": str(row["expected_answer"]).strip().upper(),
+            }
+            kept += 1
+            if kept >= 80:
+                break
+
+
+train_dataset = OpenScienceDataset()
+
+_BOXED_RE = re.compile(r"\\boxed\{([A-J])\}", re.IGNORECASE)
+
+
+async def letter_rm(args, sample, **kwargs) -> float:
+    matches = _BOXED_RE.findall(sample.response or "")
+    pred = matches[-1].upper() if matches else ""
+    return float(bool(pred) and pred == sample.label)
+
 
 base = TrainConfig(
     model=model,
     dataset=train_dataset,
     recipe=Qwen3_5_4B_Recipe(
-        eval_interval=None,
-        rollout_num_gpus=8,
-        num_rollout=15,
-        rollout_max_response_len=8192,
-        global_batch_size=32,
-        rm_type="dapo",
+        custom_rm_function=letter_rm,
     ),
 )
 
@@ -62,15 +92,13 @@ group = TrainingGroup(
 configs = group.get_train_configs()
 print(f"{len(configs)} runs in group {group.group_id}:")
 for cfg in configs:
-    print(
-        f"- lr={cfg.recipe.lr:<8}, temp={cfg.recipe.rollout_temperature}"
-    )
+    print(f"- lr={cfg.recipe.lr:<8}, temp={cfg.recipe.rollout_temperature}")
 
 # ## Launch it!
 #
 # Once it all looks good, `.launch()` it!
 
-launches = group.launch(prepare_inputs=True)
+launches = group.launch()
 print(f"group {group.group_id}: {len(launches)} runs launched")
 for launch in launches:
     print(
@@ -80,10 +108,7 @@ if group.failures:
     for overrides, err in group.failures:
         print(f"- FAILED {overrides}: {err}")
 
-results = []
-for launch in launches:
-    result = launch.result()
-    results.append(result)
-    print(f"completed {result.training_run_id} (group_id={result.group_id})")
-
+results = TrainingRun.wait_all(launches)
 print(f"group {group.group_id}: {len(results)} runs completed")
+for run in results:
+    print(f"completed {run.training_run_id} (group_id={run.group_id})")

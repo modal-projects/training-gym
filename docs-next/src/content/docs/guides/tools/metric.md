@@ -4,7 +4,34 @@ order: 2
 
 # Logging metrics
 
-The [observability dashboard](https://gym.modal.dev/guides/dashboard) captures the most important plots and metadata you'd care about during training. However, when you need access to everything logged by the [underlying framework](https://miles.radixark.com/docs), you can use our [Weights & Biases](https://wandb.ai) integration.
+The [observability dashboard](https://gym.modal.dev/guides/dashboard) captures the most important plots and metadata you'd care about during training, and its **Metrics** tab charts every scalar the [underlying framework](https://miles.radixark.com/docs) logs through `wandb.log` — with any metric provider. Use [Weights & Biases](https://wandb.ai) or [Trackio](#trackio) when you also want those numbers in an external tracker.
+
+## Dashboard only
+
+This is the default: `SlimeRecipe` and `MilesRecipe` start with `metrics=DashboardMetricConfig()` (a few model recipes override it, e.g. `Qwen3_6_27B_Recipe_Agentic` ships with Trackio), which sends the framework's metrics to the dashboard and nowhere else — no account, API key, or extra server. Set it explicitly to name the project or group:
+
+```python
+from modal_training_gym import DashboardMetricConfig, Qwen3_5_4B, Qwen3_5_4B_Recipe, TrainConfig
+
+config = TrainConfig(
+    model=Qwen3_5_4B(),
+    dataset=my_dataset,
+    recipe=Qwen3_5_4B_Recipe(
+        # ...
+        metrics=DashboardMetricConfig(project="my-rl-project"),  # optional; this is the default provider
+    ),
+)
+
+run = config.launch()
+```
+
+Open the run in the dashboard and switch to the Metrics tab: keys are grouped by prefix like W&B panels (`train/`, `rollout/`, `perf/`, ...), the search box filters every group, and charts refresh while the run trains. Only finite scalars are kept (nested dicts flatten to `a/b`; images, tables, and strings are dropped).
+
+Pass `metrics=None` to turn metric logging off entirely — the framework runs without `--use-wandb` and nothing is stored.
+
+## Weights & Biases
+
+When you need everything W&B offers (media, tables, cross-project reports), pass a `WandbConfig`. The framework logs to W&B as usual and the same scalars also appear in the dashboard's Metrics tab.
 
 First, you'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
 
@@ -38,9 +65,7 @@ When launching a [hyperparameter sweep](https://gym.modal.dev/tutorials/param_sw
 
 ## Trackio
 
-[Trackio](https://huggingface.co/docs/trackio) is a lightweight, W&B-compatible tracker from Hugging Face. Training Gym installs it in the training image and routes the framework's existing metric calls to it whenever a recipe uses `TrackioConfig`.
-
-There are two ways to visualize your metrics if you are using Trackio: 1) deploy on Modal, and 2) deploy on a Hugging Face Space.
+[Trackio](https://huggingface.co/docs/trackio) is an open-source W&B alternative which you can deploy on Modal or on a Hugging Face Space. You can even self-host! Training Gym installs it in the training image and routes the framework's metric calls to it whenever a recipe uses `TrackioConfig`; scalars also appear in the dashboard's Metrics tab.
 
 ### Deploy on Modal
 
@@ -52,16 +77,51 @@ from modal_training_gym import TrackioConfig
 metrics = TrackioConfig.deploy_to_modal(project="my-rl-project")
 ```
 
-The first call creates a Modal app, a Volume for Trackio's data, and a Secret holding a write token; later calls reuse them. Pass `metrics` to your recipe exactly like `WandbConfig`.
-
-Reads to Trackio are open unless you've set a [dashboard password](https://gym.modal.dev/guides/dashboard) with `training-gym set-password`:
+Just like the [main dashboard](https://gym.modal.dev/guides/dashboard), the Trackio dashboard is unauthenticated unless you set a password:
 
 ```bash
 training-gym set-password
 ```
 
-Training containers keep logging either way, since they authenticate with the write token instead. The password is read at container startup, so rerun `deploy_to_modal()` after changing it.
+Note that unlike the main dashboard, this will not redeploy the Trackio dashboard. I.e., you'll have to rerun `deploy_to_modal()` after changing it.
 
 ### Deploy on a Hugging Face Space
 
-Point `TrackioConfig` at a Hugging Face Space with `space_id="my-org/training-metrics"`, or at your own server with `server_url` plus a Modal Secret holding `TRACKIO_WRITE_TOKEN`. See the [reference page](https://gym.modal.dev/reference/core/trackioconfig) for all parameters.
+Simply specify a `space_id` and optionally a `bucket_id`:
+
+```python
+from modal_training_gym import Qwen3_5_4B, Qwen3_5_4B_Recipe, TrainConfig, TrackioConfig
+
+config = TrainConfig(
+    model=Qwen3_5_4B(),
+    dataset=my_dataset,
+    recipe=Qwen3_5_4B_Recipe(
+        # ...
+        metrics=TrackioConfig(
+            project="my-rl-project",
+            space_id="my-org/training-metrics",
+            bucket_id="my-org/training-metrics",  # optional
+        ),
+    ),
+)
+```
+
+### Self-hosted
+
+You'll need to create a [Modal Secret](https://modal.com/docs/guide/secrets) with your API key:
+
+```bash
+modal secret create trackio-write-token TRACKIO_WRITE_TOKEN=<your-api-key>
+```
+
+Then, it's as easy as:
+
+```python
+metrics = TrackioConfig(
+    project="my-rl-project",
+    server_url="https://trackio.example.com",
+    modal_secret_name="trackio-write-token",
+)
+```
+
+See the [reference page](https://gym.modal.dev/reference/trackioconfig) for all parameters.

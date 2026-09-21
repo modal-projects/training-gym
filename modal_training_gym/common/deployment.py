@@ -255,7 +255,7 @@ class CustomDeployment(BaseModel):
         deployment_id = create_hash(
             model.model_name,
             checkpoint.path if checkpoint is not None else "",
-            f"{type(recipe).__name__}:{recipe.recipe_type.value}",
+            f"{type(recipe).__name__}:{recipe._recipe_type.value}",
             app_name,
             model_path,
         )
@@ -310,7 +310,7 @@ class CustomDeployment(BaseModel):
 
         server_attr = (
             "SGLangEndpoint"
-            if recipe.recipe_type == DeployRecipeType.SGLANG
+            if recipe._recipe_type == DeployRecipeType.SGLANG
             else "Server"
         )
         server = getattr(app, server_attr, None)

@@ -138,205 +138,218 @@ def wrap_block(block: str, phase: str, opener: str = "_tg_rec.phase") -> str:
     )
 
 
-def _wrap_driver_loop(src: str, path: Path) -> str:
-    """Wrap the driver ``for rollout_id in range(...)`` body in a recording lane."""
-    lines = src.splitlines(keepends=True)
-    matches = [
-        (i, line)
-        for i, line in enumerate(lines)
-        if "for rollout_id in range(args.start_rollout_id, args.num_rollout):" in line
-    ]
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"{path}: expected 1 driver rollout loop, found {len(matches)}"
+def _one[T](nodes: list[T], path: Path, description: str) -> T:
+    if len(nodes) != 1:
+        raise RuntimeError(f"{path}: expected 1 {description}, found {len(nodes)}")
+    return nodes[0]
+
+
+def _driver(src: str, path: Path) -> tuple[ast.FunctionDef, ast.For]:
+    train = _one(
+        [
+            n
+            for n in ast.parse(src).body
+            if isinstance(n, ast.FunctionDef) and n.name == "train"
+        ],
+        path,
+        "train function",
+    )
+    loop = _one(
+        [
+            n
+            for n in train.body
+            if isinstance(n, ast.For)
+            and isinstance(n.target, ast.Name)
+            and n.target.id == "rollout_id"
+        ],
+        path,
+        "driver rollout loop",
+    )
+    return train, loop
+
+
+def _calls(node: ast.AST, name: str) -> bool:
+    return any(
+        isinstance(n, ast.Call) and ast.unparse(n.func) == name for n in ast.walk(node)
+    )
+
+
+def _reports(node: ast.AST, phase: str, event: str | None = None) -> bool:
+    expected = 3 if event is None else 4
+    return any(
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "_tg_report"
+        and len(n.args) == expected
+        and isinstance(n.args[0], ast.Constant)
+        and n.args[0].value == phase
+        and (
+            event is None
+            or isinstance(n.args[3], ast.Constant)
+            and n.args[3].value == event
         )
-    i, line = matches[0]
+        for n in ast.walk(node)
+    )
 
-    loop_indent = line[: len(line) - len(line.lstrip(" "))]
-    start = i + 1
-    j = start
-    while j < len(lines):
-        body_line = lines[j]
-        if body_line.strip() == "":
-            j += 1
-            continue
-        body_indent = body_line[: len(body_line) - len(body_line.lstrip(" "))]
-        if len(body_indent) <= len(loop_indent):
-            break
-        j += 1
 
-    with_line = f"{loop_indent}    with _tg_role('driver', rollout_id) as _tg_rec:\n"
-    marker = f"{loop_indent}    # {RECORDER_MARKER}: driver lane active\n"
-    new_body = []
-    for body_line in lines[start:j]:
-        if body_line.strip():
-            new_body.append("    " + body_line)
-        else:
-            new_body.append(body_line)
-    new_lines = lines[: i + 1] + [marker, with_line] + new_body + lines[j:]
-    return "".join(new_lines)
+def _source_block(src: str, first: ast.stmt, last: ast.stmt | None = None) -> str:
+    """Keep comments and formatting; use the AST only to find boundaries."""
+    lines = src.splitlines(keepends=True)
+    start = first.lineno - 1
+    prefix = " " * first.col_offset + "#"
+    while start and lines[start - 1].startswith(prefix):
+        start -= 1
+    return "".join(lines[start : (last or first).end_lineno])
+
+
+def _wrap_driver_loop(src: str, path: Path) -> str:
+    _, loop = _driver(src, path)
+    lines = src.splitlines(keepends=True)
+    start = loop.body[0].lineno - 1
+    while start and (
+        not lines[start - 1].strip() or lines[start - 1].lstrip().startswith("#")
+    ):
+        start -= 1
+    end = loop.end_lineno
+    indent = " " * loop.body[0].col_offset
+    body = "".join(lines[start:end])
+    wrapped = (
+        f"{indent}# {RECORDER_MARKER}: driver lane active\n"
+        f"{indent}with _tg_role('driver', rollout_id) as _tg_rec:\n"
+        + indent_block(body)
+        + "\n"
+    )
+    return "".join(lines[:start]) + wrapped + "".join(lines[end:])
 
 
 def _wrap_bootstrap_sync(src: str, path: Path) -> str:
-    anchor = (
-        "    # Always push actor weights to rollout once weights are loaded.\n"
-        "    actor_model.update_weights()\n"
+    train, _ = _driver(src, path)
+    sync = _one(
+        [
+            n
+            for n in train.body
+            if isinstance(n, ast.Expr) and _calls(n, "actor_model.update_weights")
+        ],
+        path,
+        "bootstrap weight sync",
     )
-    replacement = (
-        "    # Always push actor weights to rollout once weights are loaded.\n"
-        "    with _tg_role('driver', None) as _tg_rec:\n"
-        "        with _tg_rec.phase('initial_weight_sync'):\n"
-        "            actor_model.update_weights()\n"
+    lines = src.splitlines(keepends=True)
+    old = "".join(lines[sync.lineno - 1 : sync.end_lineno])
+    indent = " " * sync.col_offset
+    new = (
+        f"{indent}with _tg_role('driver', None) as _tg_rec:\n"
+        f"{indent}    with _tg_rec.phase('initial_weight_sync'):\n"
+        + indent_block(indent_block(old))
+        + "\n"
     )
-    return replace_once(src, anchor, replacement, path)
+    return "".join(lines[: sync.lineno - 1]) + new + "".join(lines[sync.end_lineno :])
 
 
-# Patches applied to the driver loop body after the rollout-status patcher has run.
-_SYNC_PHASE_WRAPS = [
-    (
-        "        if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:\n"
-        "            # PATCHED_TRAINING_GYM_EVAL_BEGIN: eval-before-train substep start\n"
-        "            _tg_report('evaluate_rollouts', args, rollout_id, 'eval_begin')\n"
-        "            ray.get(rollout_manager.eval.remote(rollout_id))\n",
-        "evaluate_rollouts",
-    ),
-    (
-        "        rollout_data_ref = ray.get(rollout_manager.generate.remote(rollout_id))\n",
-        "generate_rollouts",
-    ),
-    (
-        "        if args.offload_rollout:\n"
-        "            # PATCHED_TRAINING_GYM_OFFLOAD_ROLLOUT_STATUS: rollout offload state\n"
-        "            _tg_report('offload_rollout', args, rollout_id)\n"
-        "            ray.get(rollout_manager.offload.remote())\n",
-        "offload_rollout",
-    ),
-    (
-        "        if args.use_critic:\n"
-        "            value_refs = critic_model.async_train(rollout_id, rollout_data_ref)\n"
-        "            if actor_trains:\n"
-        "                # PATCHED_TRAINING_GYM_COMPUTE_LOG_PROBS_STATUS: compute log probs state\n"
-        "                _tg_report('compute_log_probs', args, rollout_id)\n"
-        "                ray.get(actor_model.async_train(rollout_id, rollout_data_ref, external_data=value_refs))\n"
-        "            else:\n"
-        "                ray.get(value_refs)\n"
-        "        else:\n"
-        "            # PATCHED_TRAINING_GYM_COMPUTE_LOG_PROBS_STATUS: compute log probs state\n"
-        "            _tg_report('compute_log_probs', args, rollout_id)\n"
-        "            ray.get(actor_model.async_train(rollout_id, rollout_data_ref))\n",
-        "train_models",
-    ),
-    (
-        "        if release_train or should_run_periodic_action(\n"
-        "            rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout\n"
-        "        ):\n"
-        "            # PATCHED_TRAINING_GYM_CHECKPOINT_SAVE_STATUS: checkpoint save state\n"
-        "            _tg_report('checkpoint_save', args, rollout_id)\n"
-        "            force_sync = release_train or rollout_id == args.num_rollout - 1\n"
-        "            if actor_trains:\n"
-        "                actor_model.save_model(rollout_id, force_sync=force_sync)\n"
-        "            if args.use_critic:\n"
-        "                critic_model.save_model(rollout_id, force_sync=force_sync)\n"
-        "            if args.rollout_global_dataset:\n"
-        "                ray.get(rollout_manager.save.remote(rollout_id))\n",
-        "checkpoint_save",
-    ),
-    (
-        "        # PATCHED_TRAINING_GYM_OFFLOAD_TRAIN_STATUS: train offload state\n"
-        "        _tg_report('offload_train', args, rollout_id)\n"
-        "        offload_train(actor_trains)\n",
-        "offload_train",
-    ),
-    # The onload calls belong to the weight update, as in miles: the rollout
-    # engines cannot take new weights until they are back on the GPU.
-    (
-        "        if args.offload_rollout and not release_train:\n"
-        "            ray.get(rollout_manager.onload_weights.remote())\n"
-        "        # PATCHED_TRAINING_GYM_WEIGHT_SYNC_STATUS: weight sync state\n"
-        "        _tg_report('weight_sync', args, rollout_id)\n"
-        "        actor_model.update_weights()\n"
-        "\n"
-        "        if args.offload_rollout:\n"
-        "            ray.get(rollout_manager.onload_kv.remote())\n",
-        "weight_sync",
-    ),
-    (
-        "        if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):\n"
-        "            # PATCHED_TRAINING_GYM_EVAL_END: eval-after-train substep start\n"
-        "            _tg_report('evaluate_rollouts', args, rollout_id, 'eval_end')\n"
-        "            ray.get(rollout_manager.eval.remote(rollout_id))\n",
-        "evaluate_rollouts_end",
-    ),
-]
-
-
-# train_async.py has a different loop: no eval before train, no rollout offload,
-# and the wait is on a future prefetched during the previous step.
-_ASYNC_PHASE_WRAPS = [
-    (
+_ASYNC_WAIT_BLOCKS = {
+    "wait_for_rollout": (
         "        if rollout_data_next_future is not None:\n"
-        "            rollout_data_curr_ref = ray.get(rollout_data_next_future)\n",
-        "wait_for_rollout",
+        "            rollout_data_curr_ref = ray.get(rollout_data_next_future)\n"
     ),
-    (
-        "        if args.use_critic:\n"
-        "            value_refs = critic_model.async_train(rollout_id, rollout_data_curr_ref)\n"
-        "            if actor_trains:\n"
-        "                # PATCHED_TRAINING_GYM_COMPUTE_LOG_PROBS_STATUS: compute log probs state\n"
-        "                _tg_report('compute_log_probs', args, rollout_id)\n"
-        "                ray.get(actor_model.async_train(rollout_id, rollout_data_curr_ref, external_data=value_refs))\n"
-        "            else:\n"
-        "                ray.get(value_refs)\n"
-        "        else:\n"
-        "            # PATCHED_TRAINING_GYM_COMPUTE_LOG_PROBS_STATUS: compute log probs state\n"
-        "            _tg_report('compute_log_probs', args, rollout_id)\n"
-        "            ray.get(actor_model.async_train(rollout_id, rollout_data_curr_ref))\n",
-        "train_models",
-    ),
-    (
-        "        if release_train or should_run_periodic_action(\n"
-        "            rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout\n"
-        "        ):\n"
-        "            # PATCHED_TRAINING_GYM_CHECKPOINT_SAVE_STATUS: checkpoint save state\n"
-        "            _tg_report('checkpoint_save', args, rollout_id)\n"
-        "            force_sync = release_train or rollout_id == args.num_rollout - 1\n"
-        "            if actor_trains:\n"
-        "                actor_model.save_model(rollout_id, force_sync=force_sync)\n"
-        "            if args.use_critic:\n"
-        "                critic_model.save_model(rollout_id, force_sync=force_sync)\n"
-        "            if args.rollout_global_dataset:\n"
-        "                ray.get(rollout_manager.save.remote(rollout_id))\n",
-        "checkpoint_save",
-    ),
-    # Where an async run actually waits for generation from the second step on:
-    # weights cannot be updated mid generation, so the prefetched future is
-    # consumed here. Measured apart from the weight update that follows it, and
-    # apart from the wait above: this one is on the *next* rollout's generation.
-    (
+    "wait_for_next_rollout": (
         "            # sync generate before update weights to prevent update weight in the middle of generation\n"
         "            rollout_data_curr_ref = ray.get(x) if (x := rollout_data_next_future) is not None else None\n"
-        "            rollout_data_next_future = None\n",
-        "wait_for_next_rollout",
+        "            rollout_data_next_future = None\n"
     ),
-    (
-        "            # PATCHED_TRAINING_GYM_WEIGHT_SYNC_STATUS: weight sync state\n"
-        "            _tg_report('weight_sync', args, rollout_id)\n"
-        "            actor_model.update_weights()\n",
-        "weight_sync",
-    ),
-    (
-        "        if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):\n"
-        "            # PATCHED_TRAINING_GYM_EVAL_END: eval-after-train substep start\n"
-        "            _tg_report('evaluate_rollouts', args, rollout_id, 'eval_end')\n"
-        "            ray.get(rollout_manager.eval.remote(rollout_id))\n",
-        "evaluate_rollouts_end",
-    ),
-]
+}
 
 ENTRYPOINTS = {
-    "train.py": _SYNC_PHASE_WRAPS,
-    "train_async.py": _ASYNC_PHASE_WRAPS,
+    "train.py": (
+        "evaluate_rollouts",
+        "generate_rollouts",
+        "offload_rollout",
+        "train_models",
+        "checkpoint_save",
+        "offload_train",
+        "weight_sync",
+        "evaluate_rollouts_end",
+    ),
+    "train_async.py": (
+        "wait_for_rollout",
+        "train_models",
+        "checkpoint_save",
+        "wait_for_next_rollout",
+        "weight_sync",
+        "evaluate_rollouts_end",
+    ),
 }
+
+
+def _driver_phase_blocks(
+    src: str, path: Path, phases: tuple[str, ...]
+) -> list[tuple[str, str]]:
+    _, loop = _driver(src, path)
+    blocks = []
+    for phase in phases:
+        if phase in _ASYNC_WAIT_BLOCKS:
+            blocks.append((_ASYNC_WAIT_BLOCKS[phase], phase))
+            continue
+        status, event = {
+            "train_models": ("compute_log_probs", None),
+            "evaluate_rollouts": ("evaluate_rollouts", "eval_begin"),
+            "evaluate_rollouts_end": ("evaluate_rollouts", "eval_end"),
+        }.get(phase, (phase, None))
+        statement = _one(
+            [n for n in loop.body if _reports(n, status, event)],
+            path,
+            f"{phase} boundary",
+        )
+        if phase in {
+            "train_models",
+            "checkpoint_save",
+            "offload_rollout",
+            "evaluate_rollouts",
+            "evaluate_rollouts_end",
+        }:
+            if not isinstance(statement, ast.If):
+                raise RuntimeError(f"{path}: expected a conditional {phase} block")
+            if phase == "train_models":
+                # Actor/critic branches are one training phase, including the wait.
+                block = _source_block(src, statement)
+            else:
+                if statement.orelse:
+                    raise RuntimeError(f"{path}: unexpected else branch for {phase}")
+                # Wrap only work inside the guard. This also handles comments on
+                # multiline headers without timing a skipped periodic action.
+                block = _source_block(src, statement.body[0], statement.body[-1])
+            blocks.append((block, phase))
+            continue
+        # Sync calls are directly in the loop; async sync is inside its interval guard.
+        body = statement.body if isinstance(statement, ast.If) else loop.body
+        index = _one(
+            [
+                i
+                for i, n in enumerate(body)
+                if isinstance(n, ast.Expr) and _reports(n, status, event)
+            ],
+            path,
+            f"{phase} status call",
+        )
+        call = {
+            "generate_rollouts": "rollout_manager.generate.remote",
+            "offload_train": "offload_train",
+            "weight_sync": "actor_model.update_weights",
+        }[phase]
+        if index + 1 >= len(body) or not _calls(body[index + 1], call):
+            raise RuntimeError(f"{path}: expected {call} after {phase} status")
+        first, last = body[index], body[index + 1]
+        if phase == "generate_rollouts":
+            first = last
+        elif phase == "weight_sync":
+            if index and _calls(
+                body[index - 1], "rollout_manager.onload_weights.remote"
+            ):
+                first = body[index - 1]
+            if index + 2 < len(body) and _calls(
+                body[index + 2], "rollout_manager.onload_kv.remote"
+            ):
+                last = body[index + 2]
+        blocks.append((_source_block(src, first, last), phase))
+    return blocks
 
 
 @dataclass(frozen=True)
@@ -613,7 +626,7 @@ def patch_package_file(root: Path, target: PackageTarget) -> None:
         print(f"WARNING: {target.path} substep timing patch skipped: {exc}")
 
 
-def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
+def _patch_file(path: Path, phases: tuple[str, ...]) -> None:
     if not path.exists():
         print(f"WARNING: {path} not found, skipping substep timing patch")
         return
@@ -624,6 +637,7 @@ def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
         return
 
     src = _inject_preamble(src)
+    wraps = _driver_phase_blocks(src, path, phases)
     for old, phase in wraps:
         src = replace_once(src, old, wrap_block(old, phase), path)
     src = _wrap_bootstrap_sync(src, path)
@@ -638,11 +652,8 @@ def _patch_file(path: Path, wraps: list[tuple[str, str]]) -> None:
     print(f"Patched {path.name} for substep timing ({len(wraps)} phases)")
 
 
-def _patch_entrypoint(path: Path, wraps: list[tuple[str, str]]) -> None:
-    try:
-        _patch_file(path, wraps)
-    except Exception as exc:
-        print(f"WARNING: {path} substep timing patch skipped: {exc}")
+def _patch_entrypoint(path: Path, phases: tuple[str, ...]) -> None:
+    _patch_file(path, phases)
 
 
 def main() -> None:
