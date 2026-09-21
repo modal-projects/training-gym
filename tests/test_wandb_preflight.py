@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from modal_training_gym.common.metrics import apply_metric_image
 from modal_training_gym.common.wandb import WandbConfig, preflight_wandb
 from modal_training_gym.frameworks.slime.launcher import (
     _preflight_wandb as _slime_preflight_wandb,
@@ -148,3 +149,25 @@ def test_wandb_credentials_use_environment_instead_of_cli(
     assert env.get("WANDB_API_KEY", "") == (environment_key or config_key)
     assert env["WANDB_RUN_ID"] == "run-1"
     assert metric.key == config_key
+
+
+class _FakeImage:
+    def __init__(self) -> None:
+        self.packages: list[str] = []
+        self.commands: list[str] = []
+
+    def uv_pip_install(self, package: str) -> "_FakeImage":
+        self.packages.append(package)
+        return self
+
+    def run_commands(self, command: str) -> "_FakeImage":
+        self.commands.append(command)
+        return self
+
+
+def test_wandb_image_pins_generate_id_release():
+    image = _FakeImage()
+    result = apply_metric_image(image, WandbConfig(project="sf3"))
+
+    assert result is image
+    assert image.packages == ["wandb==0.28.1"]
