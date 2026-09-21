@@ -313,9 +313,12 @@ ENTRYPOINTS = {
     "train_async.py": _ASYNC_PHASE_WRAPS,
 }
 
+_ROLLOUT_MANAGER_PATH = "miles/ray/rollout/rollout_manager.py"
+_ROLLOUT_EXECUTOR_PATH = "miles/ray/rollout/rollout_executor.py"
+
 PACKAGE_TARGETS: tuple[PackageTarget, ...] = (
     PackageTarget(
-        path="miles/ray/rollout/rollout_manager.py",
+        path=_ROLLOUT_MANAGER_PATH,
         scope=(
             "    async def generate(self, rollout_id):\n",
             "        return dict(sample_indices=sample_indices, data_ref=data_ref)\n",
@@ -524,17 +527,36 @@ def wrap_scope(src: str, scope: tuple[str, str, str], path: Path) -> str:
     )
 
 
+def _uses_rollout_components(root: Path) -> bool:
+    """Whether the checkout's drivers use the controller/executor rollout layout.
+
+    Miles split RolloutManager into an inference controller and a
+    RolloutExecutor in September 2026. A source overlay onto an older image
+    can leave the retired ``rollout_manager.py`` next to the new executor, so
+    the drivers, not the package files, decide which layout is active.
+    """
+    for name in ENTRYPOINTS:
+        entrypoint = root / name
+        if (
+            entrypoint.exists()
+            and "create_rollout_components" in entrypoint.read_text()
+        ):
+            return True
+    return not (root / _ROLLOUT_MANAGER_PATH).exists()
+
+
+def _resolve_rollout_target(root: Path, target: PackageTarget) -> PackageTarget:
+    if target.path != _ROLLOUT_MANAGER_PATH or not _uses_rollout_components(root):
+        return target
+    return replace(
+        target,
+        path=_ROLLOUT_EXECUTOR_PATH,
+        scope=("    async def get(self, rollout_id):\n", *target.scope[1:]),
+    )
+
+
 def _patch_package_file(root: Path, target: PackageTarget) -> None:
-    # Miles split RolloutManager into a controller and executor in September 2026.
-    if (
-        target.path == "miles/ray/rollout/rollout_manager.py"
-        and not (root / target.path).exists()
-    ):
-        target = replace(
-            target,
-            path="miles/ray/rollout/rollout_executor.py",
-            scope=("    async def get(self, rollout_id):\n", *target.scope[1:]),
-        )
+    target = _resolve_rollout_target(root, target)
     path = root / target.path
     if not path.exists():
         raise RuntimeError(f"{path}: not found; {root.name} layout changed")

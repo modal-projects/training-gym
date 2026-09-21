@@ -94,6 +94,12 @@ _LINE_INJECTIONS: list[tuple[str, str, str, re.Pattern[str]]] = [
     ),
 ]
 
+# Phases a driver legitimately lacks: the async driver keeps the inference
+# engine resident, so it never offloads the rollout side.
+_ABSENT_PHASES: dict[str, frozenset[str]] = {
+    "train_async.py": frozenset({"offload_rollout"}),
+}
+
 CHECKPOINT_SAVE_MARKER = "PATCHED_TRAINING_GYM_CHECKPOINT_SAVE_STATUS"
 _CHECKPOINT_SAVE_PATTERN = re.compile(
     r"^(?P<indent>[ \t]*)(?P<guard>if "
@@ -139,9 +145,7 @@ def _patch_file(path: Path) -> None:
             )
 
         src, count = pattern.subn(_replacement, src)
-        if count == 0 and not (
-            path.name == "train_async.py" and phase == "offload_rollout"
-        ):
+        if count == 0 and phase not in _ABSENT_PHASES.get(path.name, frozenset()):
             failed.append(phase)
 
     if CHECKPOINT_SAVE_MARKER not in src:

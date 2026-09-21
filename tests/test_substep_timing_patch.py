@@ -147,6 +147,43 @@ def test_miles_rollout_executor_layout(patchers, tmp_path):
     compile(path.read_text(), str(path), "exec")
 
 
+def test_miles_stale_rollout_manager_beside_executor(patchers, tmp_path):
+    """A local_miles overlay onto a legacy image leaves the retired
+    rollout_manager.py next to rollout_executor.py; the driver decides."""
+    patcher = patchers["miles"]
+    target = patcher.PACKAGE_TARGETS[0]
+    rollout_dir = tmp_path / "miles/ray/rollout"
+    rollout_dir.mkdir(parents=True)
+    legacy_source = (TESTDATA / "miles/rollout_manager.py.input").read_text()
+    legacy = rollout_dir / "rollout_manager.py"
+    legacy.write_text(legacy_source)
+    executor = rollout_dir / "rollout_executor.py"
+    executor.write_text(
+        legacy_source.replace(
+            "async def generate(self, rollout_id):", "async def get(self, rollout_id):"
+        )
+    )
+    (tmp_path / "train.py").write_text(
+        "from miles.ray.placement_group import create_rollout_components\n"
+    )
+    patcher._patch_package_file(tmp_path, target)
+    assert legacy.read_text() == legacy_source
+    assert "with _tg_role('rollout', rollout_id):" in executor.read_text()
+    compile(executor.read_text(), str(executor), "exec")
+
+
+def test_miles_legacy_layout_keeps_rollout_manager(patchers, tmp_path):
+    patcher = patchers["miles"]
+    target = patcher.PACKAGE_TARGETS[0]
+    rollout_dir = tmp_path / "miles/ray/rollout"
+    rollout_dir.mkdir(parents=True)
+    legacy = rollout_dir / "rollout_manager.py"
+    legacy.write_text((TESTDATA / "miles/rollout_manager.py.input").read_text())
+    (tmp_path / "train.py").write_text("from miles.ray import create_rollout_manager\n")
+    patcher._patch_package_file(tmp_path, target)
+    assert "with _tg_role('rollout', rollout_id):" in legacy.read_text()
+
+
 def patcher_path(framework: str) -> Path:
     return (
         FRAMEWORKS / framework / "modal_helpers" / "patches" / "patch_substep_timing.py"
