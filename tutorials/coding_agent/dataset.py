@@ -43,7 +43,7 @@ HF_DATASET = "nebius/SWE-rebench-V2"
 DATASET_ROOT = "swe_rebench_v2"
 
 SLIME_GIT_REPOSITORY = "https://github.com/modal-projects/slime.git"
-SLIME_GIT_REVISION = "a9f2e5631634affa2032d5f3f9df8d3f2bcbca62"
+SLIME_GIT_REVISION = "3585d4a7eb1a5c108810238b47c37d3107d0a2ba"
 DATA_VOLUME_NAME = "slime-data"
 
 
