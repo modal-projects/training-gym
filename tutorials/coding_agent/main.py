@@ -84,7 +84,7 @@ config = TrainConfig(
         data_volume_name=DATA_VOLUME_NAME,
         image_overlay=lambda image: image.add_local_dir(
             Path(__file__).parent, "/root/tutorials/coding_agent", copy=True
-        ),
+        ).env({"PYTHONPATH": "/root:/root/Megatron-LM/:/root/slime"}),
         memory=(1024, 2 * 1024 * 1024),
         train_function_kwargs={"ephemeral_disk": 2 * 1024 * 1024},
         environment={
