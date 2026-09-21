@@ -3,9 +3,6 @@
 Run with:
 uv run -m tutorials.coding_agent.dataset prepare
 uv run -m tutorials.coding_agent.dataset probe
-
-The probe evaluates 300 tasks eight times with the tutorial's GPU configuration,
-without training or checkpointing, then writes the mixed-reward training subset.
 """
 
 from __future__ import annotations
