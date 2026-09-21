@@ -184,10 +184,11 @@ def probe(root: Path):
         save=None,
         save_interval=None,
         n_samples_per_eval_prompt=8,
+        extra_config={**config.recipe.extra_config, "lr_decay_iters": 1},
         eval_config={
             "defaults": {
                 "n_samples_per_eval_prompt": 8,
-                "temperature": 0.6,
+                "temperature": 1.0,
                 "top_p": 1.0,
             },
             "datasets": [{"name": "train-300", "path": str(dataset.path)}],
