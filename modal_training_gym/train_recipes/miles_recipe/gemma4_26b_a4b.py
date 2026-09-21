@@ -1,14 +1,13 @@
-import dataclasses as _dc
-from collections.abc import Mapping
 from dataclasses import field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
-from pydantic_core import ArgsKwargs
 
+from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.modality import requested_modalities
 from modal_training_gym.common.patches import encode_patch
 from modal_training_gym.train_recipes.miles_recipe.recipe import MilesRecipe
 
@@ -50,9 +49,7 @@ _VISION_MODE: dict[str, Any] = {
 class Gemma4_26B_A4B_Recipe(MilesRecipe):
     """Gemma-4-26B-A4B recipe."""
 
-    _SKIP_FIELDS: ClassVar[frozenset[str]] = MilesRecipe._SKIP_FIELDS | {"modality"}
-
-    modality: Literal["text", "vision"] = "text"
+    trainable_modalities: ClassVar[frozenset[str]] = frozenset({"image"})
 
     gpu_type: str = "B300"
     colocate: bool = False
@@ -97,37 +94,6 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
     qkv_format: str = "bshd"
     no_gradient_accumulation_fusion: bool = True
     no_check_for_nan_in_loss_and_grad: bool = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def _apply_vision_defaults(cls, data: Any) -> Any:
-        """Fill unsupplied ``_VISION_MODE`` fields when ``modality="vision"``.
-
-        Applied to the incoming arguments rather than to the built recipe, so a
-        value the caller supplied is never overwritten and there is nothing to
-        disambiguate afterwards. Rebuilding a resolved recipe from all of its
-        fields is therefore a no-op.
-        """
-        if isinstance(data, ArgsKwargs):
-            args, kwargs = data.args or (), dict(data.kwargs or {})
-        elif isinstance(data, Mapping):
-            args, kwargs = (), dict(data)
-        else:
-            return data
-
-        names = [f.name for f in _dc.fields(cls) if f.init is not False]
-        positional = set(names[: len(args)])
-        if "modality" in positional:
-            modality = args[names.index("modality")]
-        else:
-            modality = kwargs.get("modality", "text")
-        if modality != "vision":
-            return data
-
-        for name, value in _VISION_MODE.items():
-            if name not in positional and name not in kwargs:
-                kwargs[name] = value
-        return ArgsKwargs(args, kwargs) if isinstance(data, ArgsKwargs) else kwargs
 
     @model_validator(mode="after")
     def _keep_image_patches(self) -> "Gemma4_26B_A4B_Recipe":
@@ -174,14 +140,23 @@ class Gemma4_26B_A4B_Recipe(MilesRecipe):
             return True
         return isinstance(extra, dict) and bool(extra.get("custom_rm_path"))
 
-    @model_validator(mode="after")
-    def _require_vision_reward(self) -> "Gemma4_26B_A4B_Recipe":
-        if self.modality == "vision" and not self._brings_own_reward():
+    def overrides(
+        self,
+        dataset: DatasetConfig | None,
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if dataset is None or "image" not in requested_modalities(dataset):
+            return out
+        if not self._brings_own_reward():
             raise TrainingGymConfigError(
-                f"{type(self).__name__}(modality='vision') needs its own reward. "
+                f"{type(self).__name__} needs its own reward for image data. "
                 "Pass custom_rm_function=... or rm_type=... to choose a built-in."
             )
-        return self
+        for name, value in _VISION_MODE.items():
+            if getattr(self, name) is None:
+                out[name] = value
+        return out
 
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         super().validate_model_parallelism(model)

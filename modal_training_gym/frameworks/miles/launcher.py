@@ -32,6 +32,7 @@ from modal_training_gym.common.metrics import (
     metric_secrets,
     preflight_metric,
 )
+from modal_training_gym.common.modality import validate_modalities
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import (
     clustered_if,
@@ -483,6 +484,9 @@ def build_miles_app(
     app_name = name or miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
     volume_prefix = miles.name or f"miles-{type(miles).__name__.lstrip('_').lower()}"
     MilesRecipe._validate_datasets(dataset, eval_dataset)
+    validate_modalities(miles, model, dataset)
+    if eval_dataset is not None:
+        validate_modalities(miles, model, eval_dataset)
     dataset_path = MilesRecipe._resolve_data_paths(dataset)
     eval_dataset_path = (
         MilesRecipe._resolve_data_paths(eval_dataset)

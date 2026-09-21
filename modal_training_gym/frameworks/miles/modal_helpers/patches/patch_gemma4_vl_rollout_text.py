@@ -1,89 +1,99 @@
-"""Patch Miles rollout to send Gemma-4 VL prompts to SGLang as text.
-
-``miles/rollout/sglang_rollout.py: generate`` runs the HF processor locally and
-sends the resulting ``input_ids``. For Gemma-4 those already carry one
-``<|image|>`` per vision patch, and SGLang re-validates them against the raw
-image, so every request 400s. Turning the chat template off is not an escape:
-the processor then gets message dicts and fails in ``validate_inputs``.
-
-slime sends ``text`` instead whenever a single-turn request carries images, so
-SGLang expands the placeholders itself; this mirrors that branch. It stays gated
-on a Gemma-4 processor because miles expects other models to keep one
-placeholder for ``mm_data.py`` to expand later.
-
-Executed at image-build time via ``python3 <this file>``.
 """
+image: radixark/miles:dev-202608041247
+commit: https://github.com/radixark/miles/commit/5c517599fb55c2528a55c749e6eda5f99f51f0ad
+file: miles/miles/rollout/generate_hub/single_turn.py::generate
+"""
+
+from __future__ import annotations
 
 import pathlib
 
-MARKER = "PATCHED_GEMMA4_VL_ROLLOUT_TEXT"
+MARKER = "PATCHED_GEMMA4_VL_SINGLE_TURN_IDS"
 
-TARGET = pathlib.Path("/root/miles/miles/rollout/sglang_rollout.py")
+TARGET = pathlib.Path("/root/miles/miles/rollout/generate_hub/single_turn.py")
 
-OLD = """    # Use existing tokens for multi-turn or tokenize the new prompt
-    if len(sample.response) > 0:
-        payload["input_ids"] = sample.tokens
-    else:
-        payload["input_ids"] = prompt_ids
-        if not sample.tokens:  # Initialize sample.tokens for the first turn
-            sample.tokens = prompt_ids
+_IMAGE_TOKEN = "<|image|>"
+
+
+def gemma4_collapse_image_token_ids(
+    prompt_ids: list[int], image_token_id: int
+) -> list[int]:
+    """Keep one image-token id per consecutive run."""
+    token_id = int(image_token_id)
+    out: list[int] = []
+    in_run = False
+    for raw in prompt_ids:
+        tid = int(raw)
+        if tid == token_id:
+            if not in_run:
+                out.append(tid)
+                in_run = True
+            continue
+        out.append(tid)
+        in_run = False
+    return out
+
+
+OLD = """    payload, halt_status = compute_request_payload(
+        args, input_ids=input_ids, sampling_params=sampling_params, multimodal_inputs=sample.multimodal_inputs
+    )
+    if payload is None:
+        sample.status = halt_status
+        return GenerateFnOutput(samples=sample)
+
+    output = await post(url, payload, headers=compute_routing_headers(args, sample))
 """
 
-NEW = f"""    # Use existing tokens for multi-turn or tokenize the new prompt
-    if (
-        payload.get("image_data")
-        and len(sample.response) == 0
-        and type(getattr(state, "processor", None)).__name__.startswith("Gemma4")
-    ):
-        # {MARKER}: Gemma-4's processor pre-expands <|image|> per patch, which
-        # SGLang rejects against the single raw image; send text and let it expand.
-        payload["text"] = sample.prompt
-        if not sample.tokens:  # Initialize sample.tokens for the first turn
-            sample.tokens = prompt_ids
-    elif len(sample.response) > 0:
-        payload["input_ids"] = sample.tokens
-    else:
-        payload["input_ids"] = prompt_ids
-        if not sample.tokens:  # Initialize sample.tokens for the first turn
-            sample.tokens = prompt_ids
+NEW = f"""    payload, halt_status = compute_request_payload(
+        args, input_ids=input_ids, sampling_params=sampling_params, multimodal_inputs=sample.multimodal_inputs
+    )
+    if payload is None:
+        sample.status = halt_status
+        return GenerateFnOutput(samples=sample)
+
+    if payload.get("image_data") and len(sample.response) == 0:
+        # {MARKER}: SGLang counts <|image|> ids against image_data, one per
+        # image. Local processor ids are one token per patch.
+        if not sample.tokens:
+            sample.tokens = list(payload["input_ids"])
+        _tok_id = getattr(getattr(input.state, "processor", None), "image_token_id", None)
+        if _tok_id is None:
+            _tok_id = input.state.tokenizer.convert_tokens_to_ids("{_IMAGE_TOKEN}")
+        _out, _run = [], False
+        for _raw in payload["input_ids"]:
+            _t = int(_raw)
+            if _t == int(_tok_id):
+                if not _run:
+                    _out.append(_t)
+                    _run = True
+            else:
+                _out.append(_t)
+                _run = False
+        payload["input_ids"] = _out
+
+    output = await post(url, payload, headers=compute_routing_headers(args, sample))
 """
 
-if not TARGET.exists():
-    print(f"{TARGET} not found; skipping Gemma-4 VL rollout text patch")
-    raise SystemExit(0)
 
-src = TARGET.read_text()
-if MARKER in src:
-    print("Gemma-4 VL rollout text patch already applied")
-    raise SystemExit(0)
-
-if OLD not in src:
-    raise SystemExit(
-        "Gemma-4 VL rollout text patch did not match; miles' sglang_rollout.py "
-        "payload construction has changed. Re-check it before shipping."
+def _patch_file(path: pathlib.Path) -> None:
+    if not path.exists():
+        print(f"{path} not found; skipping Gemma-4 VL single-turn ids patch")
+        return
+    src = path.read_text()
+    if MARKER in src:
+        print("Gemma-4 VL single-turn ids patch already applied")
+        return
+    if OLD not in src:
+        raise SystemExit(
+            "Gemma-4 VL single-turn ids patch did not match; miles' "
+            "generate_hub/single_turn.py payload construction has changed. "
+            "Re-check it before shipping."
+        )
+    path.write_text(src.replace(OLD, NEW, 1))
+    print(
+        "Patched Gemma-4 VL single-turn generate to POST one image-token id per image"
     )
 
-old_at = src.index(OLD)
-scope = src[
-    max(src.rfind("\ndef ", 0, old_at), src.rfind("\n    def ", 0, old_at)) + 1 : old_at
-]
 
-# Matching OLD says nothing about the `state` binding the injected branch reads.
-if "state = GenerateState(args)" not in scope:
-    raise SystemExit(
-        "Gemma-4 VL rollout text patch expects a local `state = GenerateState(args)` "
-        "in miles' sglang_rollout.py; it is gone, so the injected branch would never "
-        "fire. Re-check how the processor is reached before shipping."
-    )
-
-# The gate also reads payload["image_data"], which must already be assigned where
-# the replaced block sits.
-if 'payload["image_data"]' not in scope:
-    raise SystemExit(
-        'Gemma-4 VL rollout text patch expects payload["image_data"] to be set '
-        "before the token block it replaces in miles' sglang_rollout.py; it is not, "
-        "so the injected branch would never fire. Re-check the payload order."
-    )
-
-TARGET.write_text(src.replace(OLD, NEW, 1))
-print("Patched Gemma-4 VL rollout to send text instead of pre-expanded input_ids")
+if __name__ == "__main__":
+    _patch_file(TARGET)

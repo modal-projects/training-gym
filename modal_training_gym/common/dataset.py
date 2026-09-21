@@ -7,20 +7,85 @@ common sources like Hugging Face and Harbor.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from enum import Enum
-from typing import Any, Literal
+import base64
+import binascii
 import hashlib
 import json
+import mimetypes
 import random
 import shutil
 import tomllib
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
+from enum import Enum
 from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import unquote_to_bytes
 
 from modal_training_gym.common.errors import TrainingGymConfigError
 
 DatasetRow = dict[str, Any]
+
+_DATA_URI_PREFIX = "data:"
+_MIME_ALIASES = {
+    "image/jpg": "image/jpeg",
+    "audio/mp3": "audio/mpeg",
+    "audio/wav": "audio/x-wav",
+    "audio/wave": "audio/x-wav",
+}
+
+
+def _materialize_data_uri(uri: str, dest_dir: Path, index: int) -> str:
+    header, sep, payload = uri.partition(",")
+    if not sep or not header.startswith(_DATA_URI_PREFIX):
+        raise TrainingGymConfigError(f"invalid data URI: {uri[:64]!r}")
+    mime = (
+        header[len(_DATA_URI_PREFIX) :].split(";", 1)[0].lower()
+        or "application/octet-stream"
+    )
+    if ";base64" in header:
+        try:
+            raw = base64.b64decode("".join(payload.split()), validate=True)
+        except binascii.Error as exc:
+            raise TrainingGymConfigError(f"invalid base64 data URI: {exc}") from exc
+    else:
+        raw = unquote_to_bytes(payload)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    ext = mimetypes.guess_extension(_MIME_ALIASES.get(mime, mime)) or ".bin"
+    path = dest_dir / f"{index:06d}.{ext.lstrip('.')}"
+    path.write_bytes(raw)
+    return str(path.resolve())
+
+
+def _as_media_path(item, dest_dir: Path, index: int):
+    if isinstance(item, Path):
+        item = str(item)
+    if isinstance(item, (bytes, bytearray)):
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path = dest_dir / f"{index:06d}.bin"
+        path.write_bytes(bytes(item))
+        return str(path.resolve())
+    if isinstance(item, str) and item.startswith(_DATA_URI_PREFIX):
+        return _materialize_data_uri(item, dest_dir, index)
+    if isinstance(item, str):
+        if item.startswith(("http://", "https://")):
+            raise TrainingGymConfigError(
+                "remote media URLs are not supported; download the media in "
+                "source_rows() and return bytes or a local path"
+            )
+        try:
+            src = Path(item)
+            is_file = src.is_file()
+        except OSError:
+            return item
+        if is_file:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"{index:06d}{src.suffix}"
+            if src.resolve() != dest.resolve():
+                shutil.copy2(src, dest)
+            return str(dest.resolve())
+        return item
+    return item
 
 
 def _materialization_fingerprint(fields: dict[str, Any]) -> str:
@@ -35,9 +100,11 @@ class DatasetType(Enum):
 
 
 class DatasetConfig(ABC):
-    """Dataset fields and materialization behavior shared across training frameworks."""
+    """Dataset fields and on-disk serialization shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
+    modalities: frozenset[str] = frozenset()
+    media_column: str | None = None
 
     def cache_key(self) -> str | None:
         return None
@@ -70,7 +137,7 @@ class DatasetConfig(ABC):
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
-        """Materialize training data at ``path``."""
+        """Write ``rows()`` at ``path``."""
         with open(path, "w") as f:
             for row in self.rows():
                 f.write(json.dumps(row) + "\n")
@@ -81,6 +148,8 @@ class DatasetConfig(ABC):
             cols.add(self.input_key())
         if self.label_key():
             cols.add(self.label_key())
+        if self.media_column:
+            cols.add(self.media_column)
         return cols
 
     def validate_written(self, path: str) -> None:
@@ -119,11 +188,11 @@ class DatasetConfig(ABC):
         missing = expected - cols
         if missing:
             raise TrainingGymConfigError(
-                f"{type(self).__name__}.write() wrote {path!r} but it is "
+                f"{type(self).__name__} wrote {path!r} but it is "
                 f"missing required column(s) {sorted(missing)} "
                 f"(input_key={self.input_key()!r}, label_key={self.label_key()!r}). "
                 f"Columns present: {sorted(cols)}. "
-                "Either rename the column(s) your write() writes, or implement "
+                "Either rename the column(s) that rows() returns, or implement "
                 "input_key()/label_key() on your DatasetConfig subclass to match."
             )
 
@@ -599,7 +668,10 @@ class HarborDataset(DatasetConfig):
 
 
 class MultimodalDataset(DatasetConfig):
-    """Dataset of text prompts paired with image, audio, or video data."""
+    """Text prompts paired with image, audio, or video.
+
+    See [the dataset guide](https://gym.modal.dev/guides/dataset/multimodal) for more information.
+    """
 
     # TODO(ben/joy): gate-check media at this boundary so the evals dashboard can
     # reliably visualize it. Two parts: (1) normalize each emitted media item to a
@@ -628,7 +700,7 @@ class MultimodalDataset(DatasetConfig):
             raise TrainingGymConfigError(
                 "media_column must differ from input_key and label_key"
             )
-        self.multimodal_keys = {modality: self.media_column}
+        self.modalities = frozenset({modality})
         self._source_rows = list(rows or [])
 
     def input_key(self) -> str:
@@ -653,6 +725,49 @@ class MultimodalDataset(DatasetConfig):
     def rows(self) -> Iterable[DatasetRow]:
         for row in self.source_rows():
             yield self._to_row(row)
+
+    def _rows_with_paths(
+        self, rows: Iterable[DatasetRow], dest_dir: Path
+    ) -> Iterable[DatasetRow]:
+        n = 0
+        for row in rows:
+            media = row.get(self.media_column)
+            if not isinstance(media, list):
+                yield row
+                continue
+            written = [
+                _as_media_path(item, dest_dir, n + i) for i, item in enumerate(media)
+            ]
+            n += len(media)
+            yield {**row, self.media_column: written}
+
+    def write(self, path: str) -> None:
+        """Write ``rows()`` at ``path``."""
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        media_dir = dest.with_name(dest.name + ".media")
+        created_media = not media_dir.exists()
+        if not created_media:
+            suffix = 0
+            while True:
+                candidate = dest.with_name(f"{dest.name}.media.{suffix}")
+                if not candidate.exists():
+                    media_dir = candidate
+                    created_media = True
+                    break
+                suffix += 1
+        tmp = dest.with_name(dest.name + ".tmp")
+        try:
+            rows = self._rows_with_paths(self.rows(), media_dir)
+            with tmp.open("w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")
+            tmp.replace(dest)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            if created_media and media_dir.exists():
+                shutil.rmtree(media_dir)
+            raise
 
 
 class OnlineRollout(DatasetConfig):

@@ -53,6 +53,14 @@ def test_registry_uses_the_packages_one_framework_enum():
     assert recipe is not None and dataset is not None
 
 
+def test_image_validation_uses_screenspot():
+    image = next(c for c in ALL_CONFIGS if c.modality == "image")
+    _, image_ds = build_recipe_and_dataset(
+        image.framework, image.model_config(), 1, "image"
+    )
+    assert image_ds.hf_repo == "rootsautomation/ScreenSpot"
+
+
 def test_registry_names_are_unique():
     """Every model/framework pair needs an unambiguous dispatch name."""
     seen: dict[str, _ValidationConfig] = {}

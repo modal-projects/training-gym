@@ -145,3 +145,54 @@ recipe = Qwen3_5_4B_Recipe(
 
 dataset = OnlineRollout(n_rows=recipe.rollout_batch_size)
 ```
+
+A [MultimodalDataset](https://gym.modal.dev/reference/multimodaldataset) allows you to train on image or audio data.
+
+```python
+from modal_training_gym import MultimodalDataset
+
+img_dataset = MultimodalDataset(
+    rows=[
+        {
+            "prompt": "What is in this image?",
+            "media": ["/data/cat.png"], # or bytes, data URI
+            "label": "a cat",
+        }
+    ],
+    modality="image",
+)
+```
+
+The output column for `media` is `images` or `audios` by default, but you can override it with `media_column`.
+
+```python
+dataset = MultimodalDataset(
+    rows=[{"prompt": "What is in this image?", "media": ["/data/cat.png"], "label": "a cat"}],
+    modality="image",
+    media_column="pictures",
+)
+next(iter(dataset.rows()))
+# {"prompt": "What is in this image?", "pictures": ["/data/cat.png"], "label": "a cat"}
+```
+
+A subclass that loads rows dynamically implements `source_rows()` instead of `rows()`:
+
+```python
+examples = [(image_path, answer), ...]
+
+
+class ImageQuestions(MultimodalDataset):
+    def __init__(self):
+        super().__init__(modality="image")
+
+    def source_rows(self):
+        for image_path, answer in examples:
+            yield {
+                "prompt": "Describe this image.",
+                "media": image_path,
+                "label": answer,
+            }
+
+
+dataset = ImageQuestions()
+```

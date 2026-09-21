@@ -1,14 +1,10 @@
-"""Generic audio helpers shared across audio tasks and frameworks.
-
-No framework or model coupling: decode base64 / data-URI audio references to raw
-bytes, and bytes to a mono waveform at a target sample rate. The heavy decode deps
-(soundfile, librosa) are imported lazily so importing this module stays cheap and
-safe outside the training image.
-"""
+"""Generic audio helpers shared across audio tasks and frameworks."""
 
 from __future__ import annotations
 
 import base64
+import binascii
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -20,21 +16,29 @@ def data_uri_to_bytes(data_uri: str) -> bytes:
         _, _, b64 = data_uri.partition(",")
     else:
         b64 = data_uri
-    return base64.b64decode(b64)
+    return base64.b64decode("".join(b64.split()), validate=True)
 
 
 def coerce_audio_to_bytes(value: Any) -> bytes | None:
     """Coerce one audio reference to raw bytes.
 
-    Accepts ``bytes``, a base64 / data-URI ``str``, or a 1-element list/tuple of
-    either (datasets often wrap a single clip in a list). Returns ``None`` when
-    *value* carries no usable audio.
+    Accepts ``bytes``, a ``pathlib.Path``, a ``data:`` URI, a raw base64
+    string, or a 1-element list/tuple of any of those. Returns ``None``
+    when *value* carries no usable audio.
     """
     first = value[0] if isinstance(value, (list, tuple)) and value else value
     if isinstance(first, (bytes, bytearray)):
         return bytes(first)
+    if isinstance(first, Path):
+        try:
+            return first.read_bytes() if first.is_file() else None
+        except OSError:
+            return None
     if isinstance(first, str) and first:
-        return data_uri_to_bytes(first)
+        try:
+            return data_uri_to_bytes(first)
+        except binascii.Error:
+            return None
     return None
 
 

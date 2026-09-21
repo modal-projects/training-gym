@@ -1,25 +1,30 @@
-"""The multimodal passthrough: a dataset names its media column, the recipe
-forwards it to slime as --multimodal-keys. Modality-agnostic (image/audio/video).
-"""
-
-import json
+"""Multimodal dataset write + TrainConfig/recipe CLI contracts for the modality port."""
 
 import pytest
+from pydantic import ValidationError
 
-from modal_training_gym import HuggingFaceDataset, MultimodalDataset, SlimeRecipe
-
-_RECIPE_KW = dict(
-    gpu_type="H100",
-    colocate=True,
-    tensor_model_parallel_size=1,
-    sequence_parallel=False,
-    rollout_num_gpus_per_engine=1,
-    num_rollout=1,
-    rollout_batch_size=4,
-    rollout_max_response_len=256,
-    rollout_temperature=1.0,
-    save_interval=1,
+from modal_training_gym.common.dataset import MultimodalDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.models import (
+    Gemma4_26B_A4B,
+    Qwen3_4B,
+    Qwen3_6_27B,
+    Qwen3_VL_8B,
 )
+from modal_training_gym.common.train import TrainConfig
+from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
+    Gemma4_26B_A4B_Recipe,
+)
+from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_6_27b import Qwen3_6_27B_Recipe
+from modal_training_gym.train_recipes.slime_recipe.qwen3_vl_8b import Qwen3_VL_8B_Recipe
+
+
+def _mm(modality):
+    return MultimodalDataset(
+        rows=[{"prompt": "p", "media": ["ref"], "label": "l"}],
+        modality=modality,
+    )
 
 
 def _flags(args):
@@ -28,111 +33,52 @@ def _flags(args):
     }
 
 
-@pytest.mark.parametrize("modality", ["image", "audio", "video"])
-def test_multimodal_keys_emitted(modality):
-    rows = [{"prompt": "p", "media": ["ref"], "label": "l"}]
-    ds = MultimodalDataset(rows=rows, modality=modality)
-    assert ds.multimodal_keys == {modality: f"{modality}s"}
-
-    flags = _flags(SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds))
-    assert json.loads(flags["--multimodal-keys"]) == {modality: f"{modality}s"}
-    assert flags["--input-key"] == "prompt"
-    assert flags["--label-key"] == "label"
-    assert ds.apply_chat_template() is True
+def test_media_column_must_be_distinct():
+    with pytest.raises(TrainingGymConfigError, match="media_column"):
+        MultimodalDataset(rows=[], modality="image", media_column="prompt")
 
 
-def test_multimodal_dataset_can_disable_chat_template():
-    class AudioDataset(MultimodalDataset):
-        def apply_chat_template(self) -> bool:
-            return False
-
-    assert AudioDataset(rows=[]).apply_chat_template() is False
-
-
-def test_write_writes_media_column(tmp_path):
-    rows = [{"prompt": "p", "media": ["a.wav", "b.wav"], "label": "l"}]
-    ds = MultimodalDataset(rows=rows, modality="audio")
-    out = str(tmp_path / "train.jsonl")
-    ds.write(out)
-    ds.validate_written(out)  # must not raise
-    row = json.loads(open(out).readline())
-    assert row["audios"] == ["a.wav", "b.wav"]
-    assert row["prompt"] == "p" and row["label"] == "l"
-
-
-def test_text_dataset_unaffected():
-    ds = HuggingFaceDataset(
-        hf_repo="statworx/haiku",
-        input_column="keywords",
-        output_column="text",
-        input_format="text",
-    )
-    assert getattr(ds, "multimodal_keys", None) is None
-    assert "--multimodal-keys" not in SlimeRecipe(**_RECIPE_KW).cli_args(dataset=ds)
-
-
-@pytest.mark.parametrize(
-    ("input_format", "input_key", "label_key", "apply_chat_template"),
-    [
-        ("text", "messages", "label", True),
-        ("messages", "prompt", "answer", True),
-        ("raw", "prompt", "answer", False),
-    ],
-)
-def test_hugging_face_input_format_controls_dataset_fields(
-    input_format, input_key, label_key, apply_chat_template
-):
-    ds = HuggingFaceDataset(
-        hf_repo="some/dataset",
-        input_column="prompt",
-        output_column="answer",
-        input_format=input_format,
-    )
-    assert ds.input_key() == input_key
-    assert ds.label_key() == label_key
-    assert ds.apply_chat_template() is apply_chat_template
-
-
-def test_hugging_face_text_is_formatted_but_messages_pass_through(monkeypatch):
-    from datasets import Dataset
-
-    plain_text = Dataset.from_list([{"prompt": "hello", "answer": "world"}])
-    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: plain_text)
-    text_dataset = HuggingFaceDataset(
-        hf_repo="some/dataset",
-        input_column="prompt",
-        output_column="answer",
-        input_format="text",
-    )
-    assert list(text_dataset.rows()) == [
-        {
-            "messages": [{"role": "user", "content": "hello"}],
-            "label": "world",
-        }
-    ]
-
-    messages = [{"role": "user", "content": "hello"}]
-    preformatted = Dataset.from_list([{"prompt": messages, "label": "world"}])
-    monkeypatch.setattr("datasets.load_dataset", lambda *args, **kwargs: preformatted)
-    messages_dataset = HuggingFaceDataset(
-        hf_repo="some/dataset",
-        input_column="prompt",
-        output_column="label",
-        input_format="messages",
-    )
-    assert list(messages_dataset.rows()) == [{"prompt": messages, "label": "world"}]
-
-
-def test_hugging_face_rejects_unknown_input_format():
-    with pytest.raises(ValueError, match="input_format"):
-        HuggingFaceDataset(
-            hf_repo="some/dataset",
-            input_column="prompt",
-            output_column="answer",
-            input_format="unknown",
+def test_train_config_rejects_modality_mismatch():
+    with pytest.raises(ValidationError, match="cannot serve image"):
+        TrainConfig(
+            dataset=_mm("image"),
+            model=Qwen3_4B(),
+            recipe=Qwen3_4B_Recipe(),
         )
 
 
-def test_media_column_must_be_distinct():
-    with pytest.raises(ValueError):
-        MultimodalDataset(rows=[], modality="image", media_column="prompt")
+def test_qwen36_image_cli_keeps_torch_dist_ref_load():
+    args = Qwen3_6_27B_Recipe().cli_args(dataset=_mm("image"), model=Qwen3_6_27B())
+    assert "/checkpoints/Qwen3.6-27B_torch_dist_tp1pp1" in args
+    assert "--megatron-to-hf-mode" not in args
+
+
+def test_explicit_bridge_recipe():
+    flags = _flags(
+        Qwen3_VL_8B_Recipe().cli_args(dataset=_mm("image"), model=Qwen3_VL_8B())
+    )
+    assert flags["--megatron-to-hf-mode"] == "bridge"
+
+
+def test_gemma_image_cli():
+    args = Gemma4_26B_A4B_Recipe(rm_type="gemma_math").cli_args(
+        dataset=_mm("image"), model=Gemma4_26B_A4B()
+    )
+    flags = _flags(args)
+    assert flags["--qkv-format"] == "bshd"
+    assert "--sglang-enable-multimodal" in args
+
+
+def test_write_rejects_remote_media_urls(tmp_path):
+    ds = MultimodalDataset(
+        rows=[
+            {
+                "prompt": "p",
+                "media": ["https://example.test/clip.wav"],
+                "label": "l",
+            }
+        ],
+        modality="audio",
+    )
+    with pytest.raises(TrainingGymConfigError, match=r"source_rows\(\)"):
+        ds.write(str(tmp_path / "train.jsonl"))

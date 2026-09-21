@@ -12,6 +12,7 @@ from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.metric_mirror import DashboardMetricConfig
 from modal_training_gym.common.metrics import MetricConfig
+from modal_training_gym.common.modality import multimodal_key_map, requested_modalities
 from modal_training_gym.common.models import (
     ModelArchitecture,
     ModelConfig,
@@ -193,6 +194,8 @@ class SlimeRecipe(BaseTrainRecipe):
             Parser for reasoning/thinking output.
         sglang_request_params:
             Additional parameters for SGLang generation requests.
+        sglang_mm_attention_backend:
+            SGLang multimodal attention kernel.
 
         advantage_estimator:
             Advantage estimator.
@@ -325,7 +328,8 @@ class SlimeRecipe(BaseTrainRecipe):
             export.
         freeze_params_name_list:
             Parameter-name patterns matched with ``re.search`` to select frozen
-            weights.
+            weights. ``None`` resolves to the model's vision tower for
+            multimodal training.
         source_hf_checkpoint:
             Source checkpoint when it differs from the model's own.
         megatron_conversion_hf_checkpoint:
@@ -463,6 +467,7 @@ class SlimeRecipe(BaseTrainRecipe):
     sglang_tool_call_parser: str | None = None
     sglang_reasoning_parser: str | None = None
     sglang_request_params: dict | None = None
+    sglang_mm_attention_backend: str | None = None
 
     # ── RL algorithm ────────────────────────────────────────────────────────
     advantage_estimator: str = "grpo"
@@ -588,6 +593,7 @@ class SlimeRecipe(BaseTrainRecipe):
     # ── Validators ───────────────────────────────────────────────────────────
 
     _SKIP_FIELDS: ClassVar[frozenset[str]] = frozenset(_SLIME_SKIP)
+    trainable_modalities = frozenset({"image", "audio"})
 
     @model_validator(mode="after")
     def _validate_slime_source_overlay(self) -> "SlimeRecipe":
@@ -661,8 +667,9 @@ class SlimeRecipe(BaseTrainRecipe):
             dataset_path=dataset_path,
             eval_dataset_path=eval_dataset_path,
         )
-        if getattr(ds, "multimodal_keys", None):
-            fields["multimodal_keys"] = ds.multimodal_keys
+        keys = multimodal_key_map(ds)
+        if keys:
+            fields["multimodal_keys"] = keys
         return fields
 
     @staticmethod
@@ -783,6 +790,35 @@ class SlimeRecipe(BaseTrainRecipe):
     def validate_model_parallelism(self, model: "ModelConfig") -> None:
         validate_num_experts_divisible_by_expert_parallel_size(self, model)
 
+    def overrides(
+        self,
+        dataset: "DatasetConfig | None",
+        model: "ModelConfig | None",
+    ) -> dict[str, Any]:
+        out = super().overrides(dataset, model)
+        if model is None:
+            return out
+        media = requested_modalities(dataset) if dataset is not None else frozenset()
+        if model.vision_tower_param and media and self.freeze_params_name_list is None:
+            out["freeze_params_name_list"] = [model.vision_tower_param]
+        if model.custom_model_provider and "image" in media:
+            out.update(self._custom_provider_fields(model.custom_model_provider))
+            if self.sglang_mm_attention_backend is None:
+                out["sglang_mm_attention_backend"] = "triton_attn"
+        return out
+
+    def _custom_provider_fields(self, path: str) -> dict[str, Any]:
+        if "custom_model_provider_path" in self._escape_hatch_keys():
+            return {}
+        if (
+            isinstance(self.extra_config, str)
+            and self._materialized_config_keys is None
+        ):
+            raise TrainingGymConfigError(
+                "Image training with custom_model_provider requires extra_config as a dict."
+            )
+        return {"custom_model_provider_path": path}
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _fields(
@@ -817,6 +853,7 @@ class SlimeRecipe(BaseTrainRecipe):
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
                 fields.update(self._model_to_fields(model))
+        fields.update(self.overrides(dataset, model))
         if self.metrics is not None:
             fields.update(self._metrics_to_fields(self.metrics))
         out = self._emit_fields(fields)

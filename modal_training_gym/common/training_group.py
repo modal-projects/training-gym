@@ -79,16 +79,14 @@ def _valid_fields(obj: Any) -> set[str]:
     return {n for n in names if not n.startswith("_")}
 
 
-def _revalidate_recipe(recipe: Any) -> Any:
-    """Rebuild a recipe from its fields to re-run pydantic validation."""
-    if not _dc.is_dataclass(recipe):
-        return recipe
+def _revalidate_dataclass(obj: Any) -> Any:
+    """Rebuild a dataclass from its fields to re-run pydantic validation."""
+    if not _dc.is_dataclass(obj):
+        return obj
     field_values = {
-        f.name: getattr(recipe, f.name)
-        for f in _dc.fields(recipe)
-        if f.init is not False
+        f.name: getattr(obj, f.name) for f in _dc.fields(obj) if f.init is not False
     }
-    return type(recipe)(**field_values)
+    return type(obj)(**field_values)
 
 
 class TrainingGroup:
@@ -215,14 +213,14 @@ class TrainingGroup:
             if segments[0] == "recipe":
                 recipe_touched = True
 
-        if recipe_touched:
-            try:
-                cfg.recipe = _revalidate_recipe(cfg.recipe)
-            except Exception as exc:  # noqa: BLE001 — re-raise with variant context
-                raise TrainingGroupError(
-                    f"invalid override for variant {overrides!r}: {exc}"
-                ) from exc
-        return cfg
+        try:
+            if recipe_touched:
+                cfg.recipe = _revalidate_dataclass(cfg.recipe)
+            return _revalidate_dataclass(cfg)
+        except Exception as exc:  # noqa: BLE001 — re-raise with variant context
+            raise TrainingGroupError(
+                f"invalid override for variant {overrides!r}: {exc}"
+            ) from exc
 
     # ── Execution ─────────────────────────────────────────────────────────────
 

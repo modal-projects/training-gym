@@ -1,13 +1,20 @@
 """Qwen3.6-27B model configuration."""
 
-from .base import HFModelConfiguration, ModelArchitecture, parse_qwen3_6_response
+from .base import (
+    HFModelConfiguration,
+    ModelArchitecture,
+    QWEN3_5_VL_PROVIDER,
+    parse_qwen3_6_response,
+)
 
 
 class Qwen3_6_27B(HFModelConfiguration):
     """Qwen3.6-27B dense hybrid Gated DeltaNet/attention model."""
 
     response_parser = staticmethod(parse_qwen3_6_response)
-
+    supported_modalities = frozenset({"image"})
+    vision_tower_param = "visual"
+    custom_model_provider = QWEN3_5_VL_PROVIDER
     model_name = "Qwen/Qwen3.6-27B"
     architecture = ModelArchitecture(
         num_layers=64,
