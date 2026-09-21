@@ -15,6 +15,8 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+import modal
+
 from modal_training_gym import (
     DatasetConfig,
     Qwen3_6_27B,
@@ -45,8 +47,11 @@ from tutorials.coding_agent.dataset import (
 DATASET_ROOT = "swe_rebench_v2"
 DATA_ROOT = Path("/data") / DATASET_ROOT
 
-TRAIN_SUBSET = "train-300"
-EVAL_SUBSETS = ("eval",)
+PROBE = False
+TRAIN_SUBSET = (
+    "train-300" if PROBE else "train-300-mixed-reward-qwen3-6-27b-agentic-n8"
+)
+EVAL_SUBSETS = ("train-300",) if PROBE else ("eval",)
 
 class AgentTaskDataset(DatasetConfig):
     def __init__(self, path: Path):
@@ -120,7 +125,7 @@ config = TrainConfig(
         sglang_speculative_num_steps=3,
         sglang_speculative_eagle_topk=1,
         sglang_speculative_num_draft_tokens=4,
-        num_rollout=500,
+        num_rollout=1 if PROBE else 500,
         rollout_batch_size=32,
         n_samples_per_prompt=8,
         global_batch_size=256,
@@ -137,9 +142,9 @@ config = TrainConfig(
         rollout_max_response_len=8192,
         eval_max_response_len=8192,
         eval_interval=5,
-        n_samples_per_eval_prompt=1,
-        save="/checkpoints",
-        save_interval=5,
+        n_samples_per_eval_prompt=8 if PROBE else 1,
+        save=None if PROBE else "/checkpoints",
+        save_interval=None if PROBE else 5,
         sglang_server_concurrency=32,
         max_tokens_per_gpu=16384,
         log_probs_chunk_size=128,
@@ -156,7 +161,7 @@ config = TrainConfig(
         },
         eval_config={
             "defaults": {
-                "n_samples_per_eval_prompt": 1,
+                "n_samples_per_eval_prompt": 8 if PROBE else 1,
                 "temperature": 0.6,
                 "top_p": 1.0,
             },
@@ -175,5 +180,23 @@ config = TrainConfig(
     ),
 )
 
+volume = modal.Volume.from_name(DATA_VOLUME_NAME)
+prepared = {Path(entry.path).name for entry in volume.listdir(DATASET_ROOT) if entry.size}
+missing = [
+    subset for subset in (TRAIN_SUBSET, *EVAL_SUBSETS)
+    if f"{subset}.jsonl" not in prepared
+]
+if missing:
+    raise FileNotFoundError(
+        f"Missing or empty subsets: {missing}. Run dataset prepare; for the mixed "
+        "subset, set PROBE = True, run the probe, and run the printed filter command."
+    )
+
 run = config.launch()
 print(f"run id: {run.training_run_id}")
+if PROBE:
+    print(
+        "uv run -m tutorials.coding_agent.dataset mixed --source train-300 --n-samples 8 "
+        f"--probe-dump /checkpoints/agentic_rollout_dumps/{RUN_NAME}/rollout_eval_0.pt "
+        "--checkpoints-volume slime-qwen3_6_27b_recipe-checkpoints"
+    )
