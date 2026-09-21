@@ -5,8 +5,8 @@ import pytest
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.launcher_helpers import (
-    run_prepare_dataset,
     write_dataset_if_needed,
+    write_datasets,
 )
 from modal_training_gym.train_recipes.base import BaseTrainRecipe
 
@@ -32,18 +32,6 @@ class RowsDataset(DatasetConfig):
     def write(self, path: str) -> None:
         self.write_count += 1
         super().write(path)
-
-
-class FakeVolume:
-    def __init__(self) -> None:
-        self.reload_count = 0
-        self.commit_count = 0
-
-    def reload(self) -> None:
-        self.reload_count += 1
-
-    def commit(self) -> None:
-        self.commit_count += 1
 
 
 def test_resolve_data_paths_uses_cache_key():
@@ -98,23 +86,18 @@ def test_write_caller_creates_parent_directory(tmp_path):
     assert write_dataset_if_needed(dataset, path)
 
 
-def test_run_prepare_dataset_writes_train_and_eval(tmp_path):
+def test_write_datasets_writes_train_and_eval(tmp_path):
     train_dataset = RowsDataset("train", "training")
     eval_dataset = RowsDataset("eval", "evaluation")
-    volume = FakeVolume()
 
-    run_prepare_dataset(
+    assert write_datasets(
         train_dataset,
         eval_dataset,
-        volume,
         str(tmp_path / "train.jsonl"),
         str(tmp_path / "eval.jsonl"),
     )
-
     assert train_dataset.write_count == 1
     assert eval_dataset.write_count == 1
-    assert volume.reload_count == 1
-    assert volume.commit_count == 1
 
 
 def test_eval_dataset_fields_must_match_training_dataset():
