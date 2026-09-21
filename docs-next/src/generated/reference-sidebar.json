@@ -17,6 +17,10 @@
       "link": "/reference/dashboardcomponent"
     },
     {
+      "label": "DashboardMetricConfig",
+      "link": "/reference/dashboardmetricconfig"
+    },
+    {
       "label": "DatasetConfig",
       "link": "/reference/datasetconfig"
     },

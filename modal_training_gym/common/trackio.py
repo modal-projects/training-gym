@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import shlex
 import sys
 import types
 import uuid
@@ -15,6 +14,7 @@ from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.errors import TrainingGymConfigError
+from modal_training_gym.common.metric_mirror import mirror_log
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -22,11 +22,6 @@ _DEFAULT_TRACKIO_VERSION = "0.34.0"
 _DEFAULT_MODAL_APP_NAME = "training-gym-trackio"
 _RUN_NAME_ENV = "TRAINING_GYM_TRACKIO_RUN_NAME"
 _SHIM_MARKER = "_training_gym_trackio_adapter"
-_PTH_LINE = (
-    "import os; os.environ.get('TRAINING_GYM_METRIC_PROVIDER') != 'trackio' "
-    "or __import__('modal_training_gym.common.trackio', "
-    "fromlist=['install_wandb_shim']).install_wandb_shim()\n"
-)
 
 
 @dataclass
@@ -252,14 +247,7 @@ def trackio_secrets(config: TrackioConfig) -> list[Any]:
 
 
 def apply_trackio_image(image: Any, config: TrackioConfig) -> Any:
-    install_code = (
-        "import pathlib, site; "
-        "pathlib.Path(site.getsitepackages()[0], "
-        f"'_training_gym_trackio.pth').write_text({_PTH_LINE!r})"
-    )
-    return image.uv_pip_install(
-        f"trackio=={config.TRACKIO_PACKAGE_VERSION}"
-    ).run_commands(f"python3 -c {shlex.quote(install_code)}")
+    return image.uv_pip_install(f"trackio=={config.TRACKIO_PACKAGE_VERSION}")
 
 
 class TrackioLookupUnknown(Exception):
@@ -434,6 +422,7 @@ def install_wandb_shim() -> None:
     def log(
         data: dict[str, Any],
         step: int | None = None,
+        commit: bool | None = None,
         *_args: Any,
         **_kwargs: Any,
     ) -> Any:
@@ -442,8 +431,11 @@ def install_wandb_shim() -> None:
         # go through the run object directly.
         run = shim.run
         if run is None:
-            return trackio.log(data, step=step)
-        return run.log(metrics=data, step=step)
+            result = trackio.log(data, step=step)
+        else:
+            result = run.log(metrics=data, step=step)
+        mirror_log(data, step=step, commit=commit)
+        return result
 
     def finish(*_args: Any, **_kwargs: Any) -> Any:
         try:

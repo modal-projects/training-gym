@@ -7,6 +7,7 @@ from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
 from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.metric_mirror import DashboardMetricConfig
 from modal_training_gym.common.metrics import MetricConfig
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.base import (
@@ -399,6 +400,8 @@ class MilesRecipe(BaseTrainRecipe):
             Run Miles' ``train_async.py`` so rollout generation and training overlap.
         metrics:
             Metric tracker settings; expands to Miles' W&B-compatible flags.
+            Defaults to the dashboard-only tracker; ``None`` disables metric
+            logging entirely.
         docker_image:
             Registry reference for the Miles image every container runs.
         image_overlay:
@@ -646,7 +649,7 @@ class MilesRecipe(BaseTrainRecipe):
         }
     )
     async_mode: bool = False
-    metrics: MetricConfig | None = None
+    metrics: MetricConfig | None = field(default_factory=DashboardMetricConfig)
     docker_image: str = "radixark/miles:dev-202609151226"
     image_overlay: Callable[[modal.Image], modal.Image] | None = None
     local_miles: str | None = None

@@ -18,6 +18,7 @@
   import ChartControls from "../components/ChartControls.svelte";
   import MetricsRangeDropdown from "../components/MetricsRangeDropdown.svelte";
   import ZoomOutButton from "../components/ZoomOutButton.svelte";
+  import RunMetricsPanel from "../components/RunMetricsPanel.svelte";
   import { toEpochSeconds } from "../lib/format.js";
   import {
     getTimeRangeParams,
@@ -58,8 +59,8 @@
   // Maximum number of historical log lines retained in the browser.
   const HIST_BUFFER_MAX = 2000;
 
-  /** @typedef {"summary" | "rollouts" | "logs"} TabId */
-  const DETAIL_TABS = new Set(["summary", "rollouts", "logs"]);
+  /** @typedef {"summary" | "metrics" | "rollouts" | "logs"} TabId */
+  const DETAIL_TABS = new Set(["summary", "metrics", "rollouts", "logs"]);
   const DEFAULT_TAB = "summary";
 
   function parseTabFromUrl() {
@@ -1644,6 +1645,7 @@
       onSelect={selectTab}
       tabs={[
         { value: "summary", label: "Summary" },
+        { value: "metrics", label: "Metrics" },
         { value: "rollouts", label: "Rollouts", count: rolloutSummaries.length || undefined },
         { value: "logs", label: "Logs" },
       ]}
@@ -2163,6 +2165,10 @@
         </ResizableTable>
         </div>
       {/if}
+      </div>
+    {:else if activeTab === "metrics"}
+      <div class="tab-panel">
+        <RunMetricsPanel {runId} {isRunning} />
       </div>
     {:else if activeTab === "logs"}
       <div class="tab-panel">

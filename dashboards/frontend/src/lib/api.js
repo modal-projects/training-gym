@@ -204,6 +204,13 @@ export async function fetchRunTimings(trainingRunId, { signal } = {}) {
   return await res.json();
 }
 
+// Scalar metrics mirrored from wandb/trackio: `{ series: { key: [[step, value], ...] }, stale }`.
+export async function fetchRunMetrics(trainingRunId, { signal } = {}) {
+  const res = await fetch(`${SERVER}/runs/${encodeURIComponent(trainingRunId)}/metrics`, { signal });
+  if (!res.ok) throw new Error(await getErrorFromResponse(res));
+  return await res.json();
+}
+
 // One step's full per-group advantage distribution (for drill-in).
 export async function fetchRunAdvantageStep(trainingRunId, rolloutId) {
   const res = await fetch(

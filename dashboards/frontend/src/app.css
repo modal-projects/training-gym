@@ -1148,6 +1148,73 @@ table.resizable-table.sticky-first-column tr.row-selected td:first-child {
   transform: translateX(calc(-100% - 12px));
 }
 
+/* `axes` mode: y tick labels in a left gutter, x tick labels under the plot. */
+.line-chart-axes {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  column-gap: 6px;
+}
+
+.line-chart-yaxis {
+  position: relative;
+  min-width: 34px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.line-chart-yaxis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.line-chart-xaxis {
+  grid-column: 2;
+  position: relative;
+  height: 16px;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.line-chart-xaxis span {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.line-chart-xaxis span.anchor-start {
+  transform: none;
+}
+
+.line-chart-xaxis span.anchor-end {
+  transform: translateX(-100%);
+}
+
+/* ===== components/RunMetricsPanel.svelte ===== */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.metric-panel {
+  min-width: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--color-c-gray-08, #1c1c1c);
+}
+
+.metric-panel:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 /* ===== components/ComparativeBarChart.svelte ===== */
 .cbc-swatch {
   width: 10px;

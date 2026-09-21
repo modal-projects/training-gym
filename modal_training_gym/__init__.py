@@ -25,6 +25,10 @@ _EXPORTS = {
         "modal_training_gym.deploy_recipes.sglang_recipe",
         "DeepSeek_V4_Flash_SglangRecipe",
     ),
+    "DashboardMetricConfig": (
+        "modal_training_gym.common.metric_mirror",
+        "DashboardMetricConfig",
+    ),
     "DatasetConfig": ("modal_training_gym.common.dataset", "DatasetConfig"),
     "Endpoint": ("modal_training_gym.common.endpoint", "Endpoint"),
     "HarborDataset": ("modal_training_gym.common.dataset", "HarborDataset"),
@@ -240,6 +244,7 @@ __all__ = [
     "Checkpoint",
     "CheckpointType",
     "convert_megatron_checkpoint_to_hf",
+    "DashboardMetricConfig",
     "DatasetConfig",
     "DeepSeek_V4_Flash_SglangRecipe",
     "Endpoint",

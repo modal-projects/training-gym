@@ -117,14 +117,14 @@ class _FakeImage:
         return self
 
 
-def test_trackio_image_installs_trackio_and_the_conditional_wandb_adapter():
+def test_trackio_image_installs_trackio_and_the_metric_bootstrap():
     image = _FakeImage()
     result = apply_metric_image(image, TrackioConfig())
 
     assert result is image
     assert image.packages == ["trackio==0.34.0"]
     assert len(image.commands) == 1
-    assert "_training_gym_trackio.pth" in image.commands[0]
+    assert "_training_gym_metric_mirror.pth" in image.commands[0]
     assert "TRAINING_GYM_METRIC_PROVIDER" in image.commands[0]
 
 

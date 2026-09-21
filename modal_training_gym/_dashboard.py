@@ -7,6 +7,7 @@ checkout, or the copy the wheel ships at ``modal_training_gym/_frontend``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -83,6 +84,13 @@ from modal_training_gym.common.run_summary import (
     build_run_summary,
     build_run_summaries,
 )
+from modal_training_gym.common.metric_series import (
+    MAX_POINTS_PER_KEY,
+    MetricPointsBatch,
+    RunMetrics,
+    metric_series,
+    metric_series_store,
+)
 from modal_training_gym.common.step_timing import (
     RoleTimingRecord,
     legacy_run_to_records,
@@ -98,6 +106,7 @@ from modal_training_gym.common.training_rollout import (
 from modal_training_gym.utils.metadata import (
     bounded_gather_with_retries,
     vol_get as _metadata_vol_get,
+    vol_list as _metadata_vol_list,
     vol_list_metadata_with_failures,
     vol_put_many as _metadata_vol_put_many,
 )
@@ -221,11 +230,15 @@ PASSWORD_EXEMPT_PATHS = frozenset(
         "/api/training-rollouts",
         "/api/advantage-distributions",
         "/api/timing-events",
+        "/api/metric-points",
     }
 )
 
 # Only ever the *expected* side of a comparison, so publishing it is safe.
 _MISSING_TOKEN_DUMMY = "training-gym-missing-token-dummy-never-issued"
+
+# Suffix on the metric chunk files this container writes (one per process).
+METRIC_WRITER_ID = _secrets.token_hex(4)
 
 
 def _is_local() -> bool:
@@ -672,6 +685,85 @@ def fastapi_app():
 
     timing_cache: dict[str, TimingEntry] = {}
     timing_cache_lock = asyncio.Lock()
+
+    # ── Mirrored scalar metrics ──────────────────────────────────────────
+    # One in-memory table per run; a background loop writes dirty chunks to
+    # the volume every few seconds (sooner on the final batch). Each
+    # container writes its own copy of a chunk (``chunk-000001-<writer>``) and
+    # readers merge every copy (newest ingest per step wins), so autoscaled
+    # replicas can't clobber each other.
+    METRIC_FLUSH_INTERVAL_S = 5.0
+    METRIC_READ_TTL_S = 10.0
+    METRIC_CACHE_MAX_RUNS = 64
+
+    class MetricEntry:
+        def __init__(self) -> None:
+            self.metrics = RunMetrics()
+            self.dirty: set[str] = set()
+            self.loaded_at: float | None = None
+            self.lock = asyncio.Lock()
+
+    metric_cache: dict[str, MetricEntry] = {}
+
+    async def _metric_entry_for(training_run_id: str) -> MetricEntry:
+        entry = metric_cache.pop(training_run_id, None) or MetricEntry()
+        metric_cache[training_run_id] = entry  # re-insert: dict order is LRU
+        while len(metric_cache) > METRIC_CACHE_MAX_RUNS:
+            old_id, old = next(iter(metric_cache.items()))
+            del metric_cache[old_id]
+            async with old.lock:
+                await _flush_metrics(old_id, old)
+        return entry
+
+    async def _load_metrics(training_run_id: str, entry: MetricEntry) -> None:
+        """Merge the volume's chunks under in-memory points. Caller holds the lock."""
+        for chunk in await _metadata_vol_list(
+            metric_series_store(training_run_id), is_async=True
+        ):
+            entry.metrics.load_chunk(chunk)
+        entry.loaded_at = time.monotonic()
+
+    async def _flush_metrics(training_run_id: str, entry: MetricEntry) -> None:
+        """Write every dirty chunk in one commit. Caller holds the lock."""
+        if entry.dirty:
+            await _metadata_vol_put_many(
+                metric_series_store(training_run_id),
+                {
+                    f"{chunk}-{METRIC_WRITER_ID}": entry.metrics.chunk_payload(chunk)
+                    for chunk in entry.dirty
+                },
+                is_async=True,
+            )
+            entry.dirty.clear()
+
+    async def _flush_dirty_metrics() -> None:
+        for training_run_id, entry in list(metric_cache.items()):
+            if entry.dirty:
+                try:
+                    async with entry.lock:
+                        await _flush_metrics(training_run_id, entry)
+                except Exception as exc:
+                    print(f"[dashboard] metric flush failed: {exc}", flush=True)
+
+    async def _metric_flush_loop(stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), METRIC_FLUSH_INTERVAL_S)
+            await _flush_dirty_metrics()
+
+    metric_flush_stop: asyncio.Event | None = None
+
+    @web.on_event("startup")
+    async def _start_metric_flush_loop() -> None:
+        nonlocal metric_flush_stop
+        metric_flush_stop = asyncio.Event()
+        asyncio.create_task(_metric_flush_loop(metric_flush_stop))
+
+    @web.on_event("shutdown")
+    async def _stop_metric_flush_loop() -> None:
+        if metric_flush_stop is not None:
+            metric_flush_stop.set()
+        await _flush_dirty_metrics()
 
     def _rebuild_timing_lanes(entry: TimingEntry) -> None:
         records = dict(entry.persisted_records)
@@ -1362,7 +1454,60 @@ def fastapi_app():
                     training_run_id=update.training_run_id,
                     detail=str(exc),
                 )
+            if metric_entry := metric_cache.get(update.training_run_id):
+                try:
+                    async with metric_entry.lock:
+                        await _flush_metrics(update.training_run_id, metric_entry)
+                except Exception as exc:
+                    print(f"[dashboard] metric flush failed: {exc}", flush=True)
         return JSONResponse({"status": "ok", "framework_status": status.value})
+
+    @web.post("/api/metric-points")
+    async def metric_points(
+        batch: MetricPointsBatch,
+        authorization: str | None = Header(default=None),
+    ):
+        await _require_framework_status_token(batch.training_run_id, authorization)
+        entry = await _metric_entry_for(batch.training_run_id)
+        async with entry.lock:
+            if entry.loaded_at is None:
+                try:
+                    await _load_metrics(batch.training_run_id, entry)
+                except Exception:
+                    raise HTTPException(
+                        status_code=503, detail="Metric store unavailable"
+                    )
+            entry.dirty |= entry.metrics.merge_points(batch.points)
+            if batch.final:
+                await _flush_metrics(batch.training_run_id, entry)
+        return JSONResponse({"status": "ok", "accepted": len(batch.points)})
+
+    @web.get("/api/runs/{training_run_id}/metrics")
+    async def get_run_metrics(training_run_id: str = FastAPIPath()):
+        run = await _get_run_or_404(training_run_id)
+        entry = await _metric_entry_for(training_run_id)
+        async with entry.lock:
+            stale = False
+            if (
+                entry.loaded_at is None
+                or time.monotonic() - entry.loaded_at >= METRIC_READ_TTL_S
+            ):
+                try:
+                    await _load_metrics(training_run_id, entry)
+                except Exception:
+                    stale = True
+            if run.status in {
+                TrainingRunStatus.STOPPED,
+                TrainingRunStatus.CANCELLED,
+                TrainingRunStatus.COMPLETED,
+                TrainingRunStatus.FAILED,
+            }:
+                try:
+                    await _flush_metrics(training_run_id, entry)
+                except Exception:
+                    stale = True
+            series = metric_series(entry.metrics.table, MAX_POINTS_PER_KEY)
+        return JSONResponse({"series": series, "stale": stale})
 
     # ── Training rollouts ────────────────────────────────────────────────
 
