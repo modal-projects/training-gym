@@ -666,7 +666,7 @@ class OnlineRollout(DatasetConfig):
         self.n_rows = n_rows
 
     def cache_key(self) -> str | None:
-        return f"online-rollout-{self.n_rows}"
+        return f"online-rollout-{self.n_rows}-conversation"
 
     def input_key(self) -> str:
         return "prompt"
@@ -679,4 +679,7 @@ class OnlineRollout(DatasetConfig):
 
     def rows(self) -> Iterable[DatasetRow]:
         for i in range(self.n_rows):
-            yield {self.input_key(): "", self.label_key(): str(i)}
+            yield {
+                self.input_key(): [{"role": "user", "content": ""}],
+                self.label_key(): str(i),
+            }
