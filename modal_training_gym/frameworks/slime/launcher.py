@@ -372,6 +372,22 @@ def _checkpoint_conversion_cache_status(
 _serialize_slime_params = serialize_recipe_params
 
 
+def _train_function_secrets(
+    metrics: Any, extra: list[Secret] | tuple[Secret, ...] | Secret | None = None
+) -> list[Secret]:
+    secrets: list[Secret] = [
+        *(metric_secrets(metrics) if metrics is not None else []),
+        *hf_secrets(),
+        *proxy_auth_secrets(),
+    ]
+    if extra is None:
+        return secrets
+    if not isinstance(extra, (list, tuple)):
+        extra = [extra]
+    secrets.extend(extra)
+    return secrets
+
+
 def _preflight_wandb(wandb_cfg: WandbConfig) -> str:
     """Backward-compatible wrapper for the W&B preflight helper."""
     from modal_training_gym.common.wandb import preflight_wandb
@@ -913,25 +929,12 @@ def build_slime_app(
     _full_node = slime.actor_num_gpus_per_node >= 8
     _use_clustered = _multi_node or (_full_node and _supports_rdma(slime.gpu_type))
 
-    train_secrets: list[Secret] = []
-    if slime.metrics is not None:
-        train_secrets.extend(metric_secrets(slime.metrics))
-        if (
-            slime.metrics.provider == "trackio"
-            and getattr(slime.metrics, "modal_secret_name", "") == "huggingface-secret"
-        ):
-            train_secrets.extend(hf_secrets())
-    # Proxy-auth tokens for any custom_rm / generate hook that calls a
-    # CustomDeployment.launch() endpoint (teacher /generate, etc.).
-    train_secrets.extend(proxy_auth_secrets())
     train_experimental_options: dict[str, Any] = {"efa_enabled": True}
 
     train_function_kwargs = dict(slime.train_function_kwargs or {})
-    user_secrets = train_function_kwargs.pop("secrets", None)
-    if user_secrets is not None:
-        if not isinstance(user_secrets, (list, tuple)):
-            user_secrets = [user_secrets]
-        train_secrets.extend(user_secrets)
+    train_secrets = _train_function_secrets(
+        slime.metrics, train_function_kwargs.pop("secrets", None)
+    )
     user_experimental_options = train_function_kwargs.pop("experimental_options", None)
     if user_experimental_options is not None:
         train_experimental_options.update(user_experimental_options)
