@@ -11,6 +11,7 @@
 # [Harbor](https://docs.harborframework.com/).
 
 import json
+from dataclasses import replace
 
 from pathlib import Path
 from uuid import uuid4
@@ -38,8 +39,8 @@ from tutorials.coding_agent.dataset import (
 # Run with:
 #
 # ```bash
-# uv run -m tutorials.coding_agent.dataset prepare --limit 100
 # uv run -m tutorials.coding_agent.dataset prepare
+# uv run -m tutorials.coding_agent.dataset probe
 # ```
 
 DATASET_ROOT = "swe_rebench_v2"
@@ -175,5 +176,27 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
+def probe(root: Path):
+    dataset = AgentTaskDataset(root / "train-300.jsonl")
+    recipe = replace(
+        config.recipe,
+        num_rollout=0,
+        save=None,
+        save_interval=None,
+        n_samples_per_eval_prompt=8,
+        eval_config={
+            "defaults": {
+                "n_samples_per_eval_prompt": 8,
+                "temperature": 0.6,
+                "top_p": 1.0,
+            },
+            "datasets": [{"name": "train-300", "path": str(dataset.path)}],
+        },
+    )
+    run = replace(config, dataset=dataset, recipe=recipe).train()
+    return run, recipe.save_debug_rollout_data.format(rollout_id="eval_0")
+
+
+if __name__ == "__main__":
+    run = config.launch()
+    print(f"run id: {run.training_run_id}")

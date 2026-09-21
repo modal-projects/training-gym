@@ -2,6 +2,10 @@
 
 Run with:
 uv run -m tutorials.coding_agent.dataset prepare
+uv run -m tutorials.coding_agent.dataset probe
+
+The probe evaluates 300 tasks eight times with the tutorial's GPU configuration,
+without training or checkpointing, then writes the mixed-reward training subset.
 """
 
 from __future__ import annotations
@@ -243,6 +247,8 @@ def write_mixed_subset(
             instance_id,
         ),
     )
+    if not selected_ids:
+        raise ValueError("probe produced no fully gradeable mixed-reward tasks")
     write_jsonl(output_path, [indexed[instance_id] for instance_id in selected_ids])
     provenance = {
         "subset": name,
@@ -450,11 +456,14 @@ def main() -> None:
         "--limit", type=int, help="Stop after converting this many tasks."
     )
 
+    probe = subparsers.add_parser("probe")
+    probe.add_argument("--replace", action="store_true")
+
     mixed = subparsers.add_parser("mixed")
     mixed.add_argument("--source", required=True)
     mixed.add_argument("--recipe", default=DEFAULT_MIXED_RECIPE_SLUG)
     mixed.add_argument("--probe-dump", required=True)
-    mixed.add_argument("--n-samples", type=int, default=4)
+    mixed.add_argument("--n-samples", type=int, default=8)
     mixed.add_argument("--checkpoint", default="base")
     mixed.add_argument("--checkpoints-volume", required=True)
     mixed.add_argument("--replace", action="store_true")
@@ -472,12 +481,26 @@ def main() -> None:
         )
     root = f"{DATA_PATH}/{dataset_root}"
 
+    if args.command == "probe":
+        from modal_training_gym.common.run import checkpoint_location
+        from tutorials.coding_agent.main import probe
+
+        run, args.probe_dump = probe(Path(root))
+        location = checkpoint_location(run)
+        if location is None:
+            raise RuntimeError(f"probe run {run.training_run_id} has no volume metadata")
+        args.checkpoints_volume = location[1]
+        args.source = "train-300"
+        args.recipe = DEFAULT_MIXED_RECIPE_SLUG
+        args.n_samples = 8
+        args.checkpoint = "base"
+
     volume_name = DATA_VOLUME_NAME
     app = modal.App("partition-swe-dataset")
     volumes = {
         str(DATA_PATH): modal.Volume.from_name(volume_name, create_if_missing=True)
     }
-    if args.command == "mixed":
+    if args.command in {"mixed", "probe"}:
         volumes["/checkpoints"] = modal.Volume.from_name(
             args.checkpoints_volume, create_if_missing=False
         )
