@@ -1349,7 +1349,10 @@ def build_miles_app(
             except Exception:
                 pass
 
-    for tag, fn in app.registered_functions.items():
-        setattr(app, tag, fn)
+    app.download = download
+    app.prepare_dataset = prepare_dataset
+    app.resolve_checkpoint = resolve_checkpoint
+    app.convert_checkpoint = convert_checkpoint
+    app.train = train
 
     return app

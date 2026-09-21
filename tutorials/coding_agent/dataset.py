@@ -370,7 +370,7 @@ def _image() -> modal.Image:
                 SLIME_GIT_REPOSITORY,
                 SLIME_GIT_REVISION,
             ),
-            "uv pip install --system modal datasets huggingface_hub",
+            "uv pip install --system modal==1.5.5 datasets huggingface_hub",
         )
         .add_local_python_source(
             "modal_training_gym", "tutorials.coding_agent", copy=True

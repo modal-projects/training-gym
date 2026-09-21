@@ -129,12 +129,5 @@ def build_vllm_serve_app(
             print(*cmd)
             subprocess.Popen(" ".join(cmd), shell=True)
 
-    for tag, fn in app.registered_functions.items():
-        setattr(app, tag, fn)
-    for tag, cls in app.registered_classes.items():
-        setattr(app, tag, cls)
-    # The decorator returns the `_Server` handle (carries `get_url()`); the
-    # entry in `registered_functions` is only its underlying Function. Bind the
-    # server itself so callers (e.g. deployment URL resolution) get `get_url`.
     setattr(app, "Server", Server)
     return app

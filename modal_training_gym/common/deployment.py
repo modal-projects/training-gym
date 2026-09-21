@@ -314,8 +314,6 @@ class CustomDeployment(BaseModel):
             else "Server"
         )
         server = getattr(app, server_attr, None)
-        if server is None and hasattr(app, "registered_functions"):
-            server = app.registered_functions.get(server_attr)
         if server is None:
             raise RuntimeError(
                 f"Deployed {app_name!r} but could not resolve "
@@ -453,8 +451,8 @@ class CustomDeployment(BaseModel):
                 return
 
             async def _stream() -> None:
-                async for line in app._logs():
-                    print(line, end="", flush=True)
+                async for entry in app.logs.stream.aio():
+                    print(entry.message, end="", flush=True)
 
             try:
                 asyncio.run(_stream())
