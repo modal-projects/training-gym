@@ -326,6 +326,9 @@ def register_recipe_functions(
         prepare_dataset()
         data_volume.commit()
 
+    app.download = _download
+    app.prepare_dataset = _prepare_dataset
+
 
 def ship_recipe_callables(
     image: Image,
