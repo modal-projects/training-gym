@@ -82,3 +82,13 @@ def test_write_rejects_remote_media_urls(tmp_path):
     )
     with pytest.raises(TrainingGymConfigError, match=r"source_rows\(\)"):
         ds.write(str(tmp_path / "train.jsonl"))
+
+
+def test_write_rejects_missing_media_paths(tmp_path):
+    missing = tmp_path / "does-not-exist.png"
+    ds = MultimodalDataset(
+        rows=[{"prompt": "p", "media": [str(missing)], "label": "l"}],
+        modality="image",
+    )
+    with pytest.raises(TrainingGymConfigError, match="not an existing file"):
+        ds.write(str(tmp_path / "train.jsonl"))

@@ -6,11 +6,9 @@ from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
-    Gemma4_26B_A4B_Recipe,
-)
 
 from .datasets import dapo_math_dataset, media_dataset
+from .rewards import grounding_reward, transcript_reward
 
 
 def build_miles_validation(
@@ -32,15 +30,16 @@ def build_miles_validation(
             "which is registered as a miles validation target"
         )
     recipe.skip_eval_before_train = True
-    recipe.rm_type = "deepscaler"
     prompts_per_step = max(
         recipe.rollout_batch_size, recipe.over_sampling_batch_size or 0
     )
     n_rows = prompts_per_step * step_count
-    if modality != "text":
-        dataset = media_dataset(modality, n_rows=n_rows)
-        if isinstance(recipe, Gemma4_26B_A4B_Recipe):
-            recipe.rm_type = "gemma_math"
-    else:
-        dataset = dapo_math_dataset(n_rows=n_rows)
-    return recipe, dataset
+    if modality == "text":
+        recipe.rm_type = "deepscaler"
+        return recipe, dapo_math_dataset(n_rows=n_rows)
+    recipe.rm_type = None
+    if modality == "image":
+        recipe.custom_rm_function = grounding_reward
+    elif modality == "audio":
+        recipe.custom_rm_function = transcript_reward
+    return recipe, media_dataset(modality, n_rows=n_rows)

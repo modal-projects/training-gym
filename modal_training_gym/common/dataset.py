@@ -76,15 +76,20 @@ def _as_media_path(item, dest_dir: Path, index: int):
         try:
             src = Path(item)
             is_file = src.is_file()
-        except OSError:
-            return item
-        if is_file:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / f"{index:06d}{src.suffix}"
-            if src.resolve() != dest.resolve():
-                shutil.copy2(src, dest)
-            return str(dest.resolve())
-        return item
+        except OSError as exc:
+            raise TrainingGymConfigError(
+                f"media path {item!r} is not readable: {exc}"
+            ) from exc
+        if not is_file:
+            raise TrainingGymConfigError(
+                f"media path {item!r} is not an existing file; "
+                "return bytes, a data URI, or a local path from source_rows()"
+            )
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{index:06d}{src.suffix}"
+        if src.resolve() != dest.resolve():
+            shutil.copy2(src, dest)
+        return str(dest.resolve())
     return item
 
 

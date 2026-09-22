@@ -7,6 +7,7 @@ from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
 
 from .datasets import Gsm8kDataset, media_dataset
+from .rewards import grounding_reward, transcript_reward
 
 VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
 
@@ -16,11 +17,16 @@ def build_slime_validation(
 ) -> tuple[SlimeRecipe, DatasetConfig]:
     """The model's base slime recipe and the dataset for one modality."""
     recipe = SlimeRecipe.get_base_recipe(model_config)
-    recipe.rm_type = "deepscaler"
     recipe.train_function_kwargs = {
         **dict(recipe.train_function_kwargs or {}),
         "ephemeral_disk": VALIDATION_EPHEMERAL_DISK_MIB,
     }
     if modality == "text":
+        recipe.rm_type = "deepscaler"
         return recipe, Gsm8kDataset(n_rows=10)
+    recipe.rm_type = None
+    if modality == "image":
+        recipe.custom_rm_function = grounding_reward
+    elif modality == "audio":
+        recipe.custom_rm_function = transcript_reward
     return recipe, media_dataset(modality)

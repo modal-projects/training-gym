@@ -117,11 +117,20 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     fail on a GPU, minutes into a run.
     """
     recipe, dataset = build_recipe_and_dataset(
-        config.framework, config.model_config(), step_count=1
+        config.framework,
+        config.model_config(),
+        step_count=1,
+        modality=config.modality,
     )
     assert recipe is not None
     assert dataset is not None
-    assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
+    if config.modality == "text":
+        assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
+    else:
+        assert recipe.custom_rm_function is not None, (
+            f"{config.name} modality validation needs a task reward"
+        )
+        assert recipe.rm_type is None
 
 
 def test_list_prints_every_registered_model():
