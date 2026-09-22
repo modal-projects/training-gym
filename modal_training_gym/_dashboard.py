@@ -613,6 +613,7 @@ def fastapi_app():
         summary_items_from_payload,
         vol_get,
         vol_get_summary_items_healed,
+        vol_list_prefix,
         vol_put_summary_items,
     )
 
@@ -1050,18 +1051,18 @@ def fastapi_app():
 
     async def load_runs() -> list[JsonDict]:
         run_records = await load_list_summary(MetadataStore.TRAINING_RUNS_SUMMARY)
+        keys = [key for run in run_records for key in run_update_keys(run).values()]
         fetched = await bounded_gather_with_retries(
-            lambda key=key: fetch_by_id(MetadataStore.TRAINING_RUN_UPDATES, key)
-            for run in run_records
-            for key in run_update_keys(run).values()
+            lambda key=key: run_in_threadpool(
+                vol_list_prefix, MetadataStore.TRAINING_RUN_UPDATES, key
+            )
+            for key in keys
         )
         updates = {}
-        for result in fetched:
+        for key, result in zip(keys, fetched):
             if isinstance(result, BaseException):
                 continue
-            key, value = result
-            if value is not None:
-                updates[key] = value
+            updates[key] = result
         run_records = [merge_run_updates(run, updates) for run in run_records]
         try:
             result_records = await load_list_summary(
