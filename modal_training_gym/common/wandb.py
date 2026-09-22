@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 from modal_training_gym.common.metrics import MetricConfig
@@ -63,6 +63,10 @@ class WandbConfig(MetricConfig):
             return None
         base = f"https://wandb.ai/{quote(entity, safe='')}/{quote(project, safe='')}"
         return f"{base}/runs/{quote(run_id, safe='')}" if run_id else base
+
+
+def apply_wandb_image(image: Any) -> Any:
+    return image.uv_pip_install("wandb==0.28.1")
 
 
 def preflight_wandb(wandb_cfg: WandbConfig) -> str:

@@ -279,11 +279,12 @@ def test_every_provider_installs_the_mirror_pth(config):
     assert len(image.commands) == 1
     assert "_training_gym_metric_mirror.pth" in image.commands[0]
     assert "TRAINING_GYM_METRIC_PROVIDER" in image.commands[0]
-    expected = (
-        [f"trackio=={config.TRACKIO_PACKAGE_VERSION}"]
-        if isinstance(config, TrackioConfig)
-        else []
-    )
+    if isinstance(config, TrackioConfig):
+        expected = [f"trackio=={config.TRACKIO_PACKAGE_VERSION}"]
+    elif isinstance(config, WandbConfig):
+        expected = ["wandb==0.28.1"]
+    else:
+        expected = []
     assert image.packages == expected
     assert apply_metric_image(_FakeImage(), None).commands == []
 

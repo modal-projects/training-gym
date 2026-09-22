@@ -7,7 +7,7 @@
 # This tutorial trains [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B) on
 # [SWE-rebench V2](https://huggingface.co/datasets/nebius/SWE-rebench-V2).
 # During rollouts, the agent inspects repositories, edits code, and runs commands
-# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) via 
+# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) using 
 # [Harbor](https://docs.harborframework.com/).
 
 import json
@@ -69,7 +69,7 @@ class AgentTaskDataset(DatasetConfig):
 
 # ## Start training
 # 
-# With the [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe),
+# With the [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
 # recipe class, it's just that simple.
 
 RUN_NAME = f"coding-agent-{uuid4().hex}"
@@ -97,7 +97,7 @@ config = TrainConfig(
         image_run_commands=[
             "apt-get update && apt-get install -y --no-install-recommends "
             "rdma-core libibverbs1 ibverbs-providers",
-            "uv pip install --system modal mini-swe-agent datasets",
+            "uv pip install --system modal==1.5.5 mini-swe-agent datasets",
         ],
         image_env={"MSWEA_SILENT_STARTUP": "1"},
         app_tags={"agentic_rollout": "harbor"},

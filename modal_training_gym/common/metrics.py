@@ -94,6 +94,10 @@ def apply_metric_image(image: Any, metric: MetricConfig | None) -> Any:
         from modal_training_gym.common.trackio import apply_trackio_image
 
         image = apply_trackio_image(image, metric)
+    if metric.provider == "wandb":
+        from modal_training_gym.common.wandb import apply_wandb_image
+
+        image = apply_wandb_image(image)
     return image.run_commands(pth_install_command())
 
 
