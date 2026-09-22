@@ -7,7 +7,7 @@
 # This tutorial trains [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B) on
 # [SWE-rebench V2](https://huggingface.co/datasets/nebius/SWE-rebench-V2).
 # During rollouts, the agent inspects repositories, edits code, and runs commands
-# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) via 
+# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) via
 # [Harbor](https://docs.harborframework.com/).
 
 import json
@@ -35,7 +35,10 @@ from tutorials.coding_agent.dataset import (
 # the data to create balanced, repository-disjoint train/eval sets.
 # Since this is verbose, we have a
 # [separate preprocessing script](https://github.com/modal-projects/training-gym/blob/main/tutorials/coding_agent/dataset.py).
-# 
+# The probe runs 8 episodes per task on 300 training tasks, without updating
+# the model. We keep tasks with a mix of successes and failures, so that we only
+# train on tasks with useful GRPO learning signal.
+#
 # Run with:
 #
 # ```bash
@@ -69,7 +72,7 @@ class AgentTaskDataset(DatasetConfig):
                     yield json.loads(line)
 
 # ## Start training
-# 
+#
 # With the [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe),
 # recipe class, it's just that simple.
 

@@ -23,6 +23,7 @@ import modal
 
 from modal_training_gym.common import hf_secrets
 from modal_training_gym.common.dataset_partitioning import sample_rows, split_rows
+from modal_training_gym.common.run import checkpoint_location
 from modal_training_gym.frameworks.slime.launcher import (
     SLIME_IMAGE,
     _slime_git_overlay_command,
@@ -132,7 +133,6 @@ def write_partitions(
 def aggregate_probe_samples(
     samples: list[Any], *, n_samples: int
 ) -> dict[str, dict[str, int]]:
-
     def value(sample: Any, key: str, default: Any = None) -> Any:
         return (
             sample.get(key, default)
@@ -453,8 +453,8 @@ def main() -> None:
         "--limit", type=int, help="Stop after converting this many tasks."
     )
 
-    probe = subparsers.add_parser("probe")
-    probe.add_argument("--replace", action="store_true")
+    probe_parser = subparsers.add_parser("probe")
+    probe_parser.add_argument("--replace", action="store_true")
 
     mixed = subparsers.add_parser("mixed")
     mixed.add_argument("--source", required=True)
@@ -479,13 +479,14 @@ def main() -> None:
     root = f"{DATA_PATH}/{dataset_root}"
 
     if args.command == "probe":
-        from modal_training_gym.common.run import checkpoint_location
         from tutorials.coding_agent.main import probe
 
         run, args.probe_dump = probe(Path(root))
         location = checkpoint_location(run)
         if location is None:
-            raise RuntimeError(f"probe run {run.training_run_id} has no volume metadata")
+            raise RuntimeError(
+                f"probe run {run.training_run_id} has no volume metadata"
+            )
         args.checkpoints_volume = location[1]
         args.source = "train-300"
         args.recipe = DEFAULT_MIXED_RECIPE_SLUG
