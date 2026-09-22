@@ -21,10 +21,6 @@ _EXPORTS = {
         "modal_training_gym.common.dashboard_components",
         "DashboardComponent",
     ),
-    "DeepSeek_V4_Flash_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "DeepSeek_V4_Flash_SglangRecipe",
-    ),
     "DashboardMetricConfig": (
         "modal_training_gym.common.metric_mirror",
         "DashboardMetricConfig",
@@ -61,10 +57,6 @@ _EXPORTS = {
     "GLM_4_7_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "GLM_4_7_Recipe",
-    ),
-    "GLM_4_7_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "GLM_4_7_SglangRecipe",
     ),
     "HFModelConfiguration": (
         "modal_training_gym.common.models",
@@ -105,39 +97,15 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_0_6B_Recipe",
     ),
-    "Qwen3_0_6B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_0_6B_SglangRecipe",
-    ),
-    "Qwen3_0_6B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_0_6B_VllmRecipe",
-    ),
     "Qwen3_1_7B": ("modal_training_gym.common.models", "Qwen3_1_7B"),
     "Qwen3_1_7B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_1_7B_Recipe",
     ),
-    "Qwen3_1_7B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_1_7B_SglangRecipe",
-    ),
-    "Qwen3_1_7B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_1_7B_VllmRecipe",
-    ),
     "Qwen3_4B": ("modal_training_gym.common.models", "Qwen3_4B"),
     "Qwen3_4B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_4B_Recipe",
-    ),
-    "Qwen3_4B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_4B_SglangRecipe",
-    ),
-    "Qwen3_4B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_4B_VllmRecipe",
     ),
     "Qwen3_5_0_8B": ("modal_training_gym.common.models", "Qwen3_5_0_8B"),
     "Qwen3_5_0_8B_Recipe": (
@@ -168,35 +136,11 @@ _EXPORTS = {
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_8B_Recipe",
     ),
-    "Qwen3_8B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_8B_SglangRecipe",
-    ),
-    "Qwen3_8B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_8B_VllmRecipe",
-    ),
     "Qwen3_30B": ("modal_training_gym.common.models", "Qwen3_30B"),
-    "Qwen3_30B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_30B_SglangRecipe",
-    ),
-    "Qwen3_30B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_30B_VllmRecipe",
-    ),
     "Qwen3_6_35B": ("modal_training_gym.common.models", "Qwen3_6_35B"),
     "Qwen3_6_35B_Recipe": (
         "modal_training_gym.train_recipes.slime_recipe",
         "Qwen3_6_35B_Recipe",
-    ),
-    "Qwen3_6_35B_SglangRecipe": (
-        "modal_training_gym.deploy_recipes.sglang_recipe",
-        "Qwen3_6_35B_SglangRecipe",
-    ),
-    "Qwen3_6_35B_VllmRecipe": (
-        "modal_training_gym.deploy_recipes.vllm_recipe",
-        "Qwen3_6_35B_VllmRecipe",
     ),
     "Qwen3_6_27B": ("modal_training_gym.common.models", "Qwen3_6_27B"),
     "Qwen3_6_27B_Recipe": (
@@ -246,7 +190,6 @@ __all__ = [
     "convert_megatron_checkpoint_to_hf",
     "DashboardMetricConfig",
     "DatasetConfig",
-    "DeepSeek_V4_Flash_SglangRecipe",
     "Endpoint",
     "DeepSeek_V4_1_Flash",
     "DeepSeek_V4_1_Flash_Recipe",
@@ -254,7 +197,6 @@ __all__ = [
     "Gemma4_26B_A4B_Recipe",
     "GLM_4_7",
     "GLM_4_7_Recipe",
-    "GLM_4_7_SglangRecipe",
     "HarborDataset",
     "EvalConfig",
     "EvalConfigDurable",
@@ -285,16 +227,10 @@ __all__ = [
     "ParsedResponse",
     "Qwen3_0_6B",
     "Qwen3_0_6B_Recipe",
-    "Qwen3_0_6B_SglangRecipe",
-    "Qwen3_0_6B_VllmRecipe",
     "Qwen3_1_7B",
     "Qwen3_1_7B_Recipe",
-    "Qwen3_1_7B_SglangRecipe",
-    "Qwen3_1_7B_VllmRecipe",
     "Qwen3_4B",
     "Qwen3_4B_Recipe",
-    "Qwen3_4B_SglangRecipe",
-    "Qwen3_4B_VllmRecipe",
     "Qwen3_5_0_8B",
     "Qwen3_5_0_8B_Recipe",
     "Qwen3_5_2B",
@@ -306,15 +242,9 @@ __all__ = [
     "Qwen3_5_9B_Recipe",
     "Qwen3_8B",
     "Qwen3_8B_Recipe",
-    "Qwen3_8B_SglangRecipe",
-    "Qwen3_8B_VllmRecipe",
     "Qwen3_30B",
-    "Qwen3_30B_SglangRecipe",
-    "Qwen3_30B_VllmRecipe",
     "Qwen3_6_35B",
     "Qwen3_6_35B_Recipe",
-    "Qwen3_6_35B_SglangRecipe",
-    "Qwen3_6_35B_VllmRecipe",
     "Qwen3_6_27B",
     "Qwen3_6_27B_Recipe",
     "Qwen3_8_27B",
