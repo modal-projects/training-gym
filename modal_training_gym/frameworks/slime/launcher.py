@@ -15,16 +15,13 @@ Usage (from a tutorial file):
 Then: `uv run modal run <tutorial_file>.py::train`.
 """
 
-import asyncio
 import os
 import shlex
 import subprocess
 import tempfile
-import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
-from collections.abc import Callable
-from modal import App, Image, Secret, Volume, Retries
+from modal import App, Image, Secret
 
 from modal_training_gym.common import hf_secrets, proxy_auth_secrets
 
@@ -34,51 +31,41 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
 from modal_training_gym.common.models import ModelConfig
-from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.ray_cluster import (
-    ModalRayCluster,
     _supports_rdma,
     clustered_if,
 )
 from modal_training_gym.common.run import (
-    TrainingRunStatus,
     has_torch_dist_checkpoint,
-    mark_training_attempt_finished,
     record_resume_checkpoint,
     torch_dist_resume_checkpoint,
 )
+from modal_training_gym.common import launcher_helpers as shared
 from modal_training_gym.common.launcher_helpers import (
-    apply_scoped_save,
-    build_app_tags,
-    build_terminal_run_record,
     compute_recipe_save_root,
+    build_app_tags,
+    apply_scoped_save,
     init_training_run_record,
-    persist_completed_run,
-    mark_run_failed,
-    mark_run_stopped,
     mount_caller_source,
     resolve_caller_context,
-    resolve_checkpoint_volumes,
-    run_download_phase,
-    run_prepare_dataset,
-    ship_callable,
-    write_dataset_if_needed,
+    register_recipe_functions,
+    report_phase,
+    start_training_cluster,
+    download_model_if_needed,
+    write_datasets,
 )
-from modal_training_gym.common.train_result import save_train_result_blob
 from modal_training_gym.common.launcher_utils import (
-    drop_materialized_config_key,
-    serialize_recipe_params,
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
     apply_metric_image,
-    metric_metadata,
     metric_runtime_env,
     metric_secrets,
     preflight_metric,
 )
 from modal_training_gym.common.trackio import resolve_trackio_destination
 from modal_training_gym.common.wandb import WandbConfig
+from modal_training_gym.common.status_reporter import flush as flush_status_reporter
 from modal_training_gym.common.status import SlimeStatus
 from modal_training_gym.common.torch_dist_checkpoint import (
     is_complete_torch_dist_checkpoint_dir,
@@ -100,22 +87,6 @@ from .modal_helpers.utils import (
 from modal_training_gym.common.patches import _MEGATRON_PATCHES, encode_patch
 from modal_training_gym.common.checkpoint import Checkpoint
 from modal_training_gym.common.framework import Framework
-
-
-def _validate_resume_checkpoint(
-    resume_from_iteration: int | None, num_rollout: int
-) -> None:
-    if resume_from_iteration is not None and resume_from_iteration + 1 > num_rollout:
-        raise RuntimeError(
-            f"Resume would start at rollout {resume_from_iteration + 1}, "
-            f"but num_rollout={num_rollout}; nothing would run."
-        )
-    if resume_from_iteration is not None and resume_from_iteration + 1 == num_rollout:
-        print(
-            "WARNING: Resume checkpoint is already at the final configured "
-            "rollout; the retry will exit without running another rollout.",
-            flush=True,
-        )
 
 
 SLIME_ROOT = "/root/slime"
@@ -300,17 +271,6 @@ def _build_conversion_config(slime_cfg: Any, model: Any = None) -> dict[str, Any
 _CONVERSION_CONFIG_FILE = ".conversion_config.json"
 
 
-def _response_parser_path(model: Any) -> str:
-    """Import path of the model's response parser so the rollout recorder can
-    resolve and apply it remotely. Empty when the model sets no parser."""
-    fn = getattr(model, "response_parser", None) if model is not None else None
-    if fn is None:
-        return ""
-    module = getattr(fn, "__module__", "")
-    qualname = getattr(fn, "__qualname__", "") or getattr(fn, "__name__", "")
-    return f"{module}.{qualname}" if module and qualname else ""
-
-
 _PIPELINE_SPLIT_FLAGS = (
     "--decoder-first-pipeline-num-layers",
     "--decoder-last-pipeline-num-layers",
@@ -367,9 +327,6 @@ def _checkpoint_conversion_cache_status(
     if not _conversion_config_matches(stored_config, current_config):
         return "stale", stored_config
     return "hit", stored_config
-
-
-_serialize_slime_params = serialize_recipe_params
 
 
 def _preflight_wandb(wandb_cfg: WandbConfig) -> str:
@@ -499,105 +456,12 @@ def build_slime_app(
             f"echo {_PATCH_VALIDATION_B64} | base64 -d | python3",
         )
 
-    def _get_custom_generate_path() -> str:
-        cfg = slime.extra_config
-        if not isinstance(cfg, dict):
-            return ""
-        raw = cfg.get("custom_generate_function_path", "")
-        return raw if isinstance(raw, str) else ""
-
-    def _set_custom_generate_path(path: str) -> None:
-        cfg = dict(slime.extra_config) if isinstance(slime.extra_config, dict) else {}
-        cfg["custom_generate_function_path"] = path
-        object.__setattr__(slime, "extra_config", cfg)
-
-    def _set_extra_config_path(key: str) -> Callable[[str], None]:
-        def setter(path: str) -> None:
-            cfg = (
-                dict(slime.extra_config) if isinstance(slime.extra_config, dict) else {}
-            )
-            cfg[key] = path
-            object.__setattr__(slime, "extra_config", cfg)
-
-        return setter
-
-    def _ship_callable(
-        fn: Any,
-        *,
-        fallback_name: str,
-        set_path: Callable[[str], None],
-    ) -> None:
-        nonlocal image
-        image = ship_callable(
-            image,
-            fn,
-            caller_script=caller_script,
-            fallback_name=fallback_name,
-            set_path=set_path,
-        )
-
-    def _set_custom_rm_path(path: str) -> None:
-        cfg = dict(slime.extra_config) if isinstance(slime.extra_config, dict) else {}
-        cfg["custom_rm_path"] = path
-        object.__setattr__(slime, "extra_config", cfg)
-
-    _ship_callable(
-        slime.custom_rm_function,
-        fallback_name="custom_rm",
-        set_path=_set_custom_rm_path,
+    image = shared.ship_recipe_callables(
+        image,
+        slime,
+        caller_script=caller_script,
+        reward_post_process_in_config=True,
     )
-    _ship_callable(
-        slime.custom_generate_function,
-        fallback_name="custom_generate",
-        set_path=_set_custom_generate_path,
-    )
-    _ship_callable(
-        slime.custom_reward_post_process_function,
-        fallback_name="custom_reward_post_process",
-        set_path=_set_extra_config_path("custom_reward_post_process_path"),
-    )
-    _ship_callable(
-        slime.rollout_function if callable(slime.rollout_function) else None,
-        fallback_name="rollout_function",
-        set_path=lambda path: object.__setattr__(slime, "rollout_function", path),
-    )
-    for attr, config_key, fallback_name in (
-        (
-            "custom_rollout_log_function",
-            "training_gym_custom_rollout_log_function_path",
-            "custom_rollout_log",
-        ),
-        (
-            "custom_eval_rollout_log_function",
-            "training_gym_custom_eval_rollout_log_function_path",
-            "custom_eval_rollout_log",
-        ),
-        (
-            "custom_megatron_before_log_prob_hook",
-            "training_gym_custom_megatron_before_log_prob_hook_path",
-            "before_log_prob_hook",
-        ),
-        (
-            "custom_megatron_before_train_step_hook",
-            "training_gym_custom_megatron_before_train_step_hook_path",
-            "before_train_step_hook",
-        ),
-    ):
-        value = getattr(slime, attr)
-        _ship_callable(
-            value if callable(value) else None,
-            fallback_name=fallback_name,
-            set_path=_set_extra_config_path(config_key),
-        )
-        if callable(value):
-            object.__setattr__(slime, attr, None)
-
-    if slime.custom_rm_function is not None:
-        object.__setattr__(slime, "custom_rm_function", None)
-    if slime.custom_generate_function is not None and _get_custom_generate_path():
-        object.__setattr__(slime, "custom_generate_function", None)
-    if slime.custom_reward_post_process_function is not None:
-        object.__setattr__(slime, "custom_reward_post_process_function", None)
 
     # ── SGLang request params auto-wiring ─────────────────────────────────
     if slime.sglang_request_params:
@@ -633,82 +497,48 @@ def build_slime_app(
         )
 
     # ── Volumes ──────────────────────────────────────────────────────────────
-    hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume_name = slime.data_volume_name or f"{volume_prefix}-data"
-    data_volume = Volume.from_name(data_volume_name, create_if_missing=True)
-    checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
-        resolve_checkpoint_volumes(
+    checkpoints_volume_name, checkpoints_mount_path, all_volumes = (
+        shared.create_training_volumes(
             checkpoint,
             volume_prefix=volume_prefix,
-            default_mount_path=str(CHECKPOINTS_PATH),
+            data_volume_name=slime.data_volume_name,
+            mount_metadata=True,
         )
     )
+    hf_cache_volume = all_volumes[str(HF_CACHE_PATH)]
+    data_volume = all_volumes[str(DATA_PATH)]
+    checkpoints_volume = all_volumes[checkpoints_mount_path]
     checkpoint_dir = compute_recipe_save_root(
         slime,
-        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        recipe_default_save_root=str(CHECKPOINTS_PATH),
         mounted_save_root=checkpoints_mount_path,
         training_run_id=training_run_id,
     )
-    metadata_volume = Volume.from_name("training-gym-metadata", create_if_missing=True)
-    all_volumes: dict[str | PurePosixPath, Any] = {
-        str(HF_CACHE_PATH): hf_cache_volume,
-        str(DATA_PATH): data_volume,
-        checkpoints_mount_path: checkpoints_volume,
-        "/metadata": metadata_volume,
-    }
 
-    # ── App ──────────────────────────────────────────────────────────────────
     tags = build_app_tags(
         framework="slime",
         model=model,
         recipe_app_tags=slime.app_tags,
         metrics=slime.metrics,
     )
-
     app = App(app_name, tags=tags)
     gpu_spec = f"{slime.gpu_type}:{slime.gpu_allocation.gpus_per_node}"
 
-    @app.function(
-        image=image,
-        volumes={
-            str(HF_CACHE_PATH): hf_cache_volume,
-            checkpoints_mount_path: checkpoints_volume,
-        },
-        timeout=6 * 60 * 60,
-        secrets=[*hf_secrets(), *proxy_auth_secrets()],
-        serialized=True,
-        name="download",
+    register_recipe_functions(
+        app,
+        image,
+        hf_cache_volume=hf_cache_volume,
+        data_volume=data_volume,
+        checkpoints_volume=checkpoints_volume,
+        checkpoints_mount_path=checkpoints_mount_path,
+        download_phase=SlimeStatus.DOWNLOAD_MODEL.value,
+        download=model.download,
+        download_timeout=6 * 60 * 60,
+        prepare_dataset=lambda: write_datasets(
+            dataset, eval_dataset, dataset_path, eval_dataset_path
+        ),
+        dataset_timeout=2 * 60 * 60,
     )
-    def download(
-        training_run_id: str = "",
-        framework_status_url: str = "",
-        framework_status_token: str = "",
-    ):
-        run_download_phase(
-            training_run_id=training_run_id,
-            phase=SlimeStatus.DOWNLOAD_MODEL.value,
-            framework_status_url=framework_status_url,
-            framework_status_token=framework_status_token,
-            volumes=(hf_cache_volume, checkpoints_volume),
-            download=model.download,
-        )
-
-    @app.function(
-        image=image,
-        volumes={str(DATA_PATH): data_volume},
-        timeout=2 * 60 * 60,
-        secrets=hf_secrets(),
-        serialized=True,
-        name="prepare_dataset",
-    )
-    def prepare_dataset():
-        run_prepare_dataset(
-            dataset,
-            eval_dataset,
-            data_volume,
-            dataset_path,
-            eval_dataset_path,
-        )
 
     convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
         slime, model=model
@@ -732,27 +562,19 @@ def build_slime_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ) -> str | None:
-        from modal_training_gym.common.status_reporter import (
-            enqueue_framework_status,
-            flush as flush_status_reporter,
+        report_phase(
+            training_run_id,
+            SlimeStatus.CONVERT_MODEL.value,
+            framework_status_url,
+            framework_status_token,
         )
-
-        if training_run_id:
-            enqueue_framework_status(
-                training_run_id,
-                SlimeStatus.CONVERT_MODEL.value,
-                url=framework_status_url or None,
-                token=framework_status_token or None,
-                is_active=True,
-            )
 
         # Bridge mode loads HF weights directly into Megatron at train time.
         if getattr(slime, "megatron_to_hf_mode", None) == "bridge":
             print(
                 "Bridge mode — HF weights loaded directly via AutoBridge; no conversion needed."
             )
-            if training_run_id:
-                flush_status_reporter(timeout_seconds=2.0)
+            flush_status_reporter(timeout_seconds=2.0)
             return None
 
         hf_cache_volume.reload()
@@ -765,8 +587,7 @@ def build_slime_app(
         )
         if cache_status == "hit":
             print(f"Using existing torch_dist checkpoint at {save_path}.")
-            if training_run_id:
-                flush_status_reporter(timeout_seconds=2.0)
+            flush_status_reporter(timeout_seconds=2.0)
             return None
         print(f"torch_dist checkpoint at {save_path} is {cache_status}.")
 
@@ -819,10 +640,6 @@ def build_slime_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ):
-        from modal_training_gym.common.status_reporter import (
-            flush as flush_status_reporter,
-        )
-
         save_path = str(slime.ref_load)
 
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(
@@ -902,8 +719,7 @@ def build_slime_app(
         if node_rank == 0:
             print(f"Saved torch_dist checkpoint to {save_path}")
 
-        if training_run_id:
-            flush_status_reporter(timeout_seconds=2.0)
+        flush_status_reporter(timeout_seconds=2.0)
 
     # Use Modal's clustered scheduler with RDMA when using a full node (8+ GPUs)
     # on RDMA-capable hardware, or for any multi-node run.  The `rdma=True` flag
@@ -924,43 +740,16 @@ def build_slime_app(
     # Proxy-auth tokens for any custom_rm / generate hook that calls a
     # CustomDeployment.launch() endpoint (teacher /generate, etc.).
     train_secrets.extend(proxy_auth_secrets())
-    train_experimental_options: dict[str, Any] = {"efa_enabled": True}
-
-    train_function_kwargs = dict(slime.train_function_kwargs or {})
-    user_secrets = train_function_kwargs.pop("secrets", None)
-    if user_secrets is not None:
-        if not isinstance(user_secrets, (list, tuple)):
-            user_secrets = [user_secrets]
-        train_secrets.extend(user_secrets)
-    user_experimental_options = train_function_kwargs.pop("experimental_options", None)
-    if user_experimental_options is not None:
-        train_experimental_options.update(user_experimental_options)
-    train_ephemeral_disk = train_function_kwargs.pop("ephemeral_disk", None)
-    if train_function_kwargs:
-        unsupported = ", ".join(sorted(train_function_kwargs))
-        raise TypeError(f"Unsupported slime.train_function_kwargs keys: {unsupported}")
 
     @app.function(
         image=train_image,
-        gpu=gpu_spec,
-        memory=slime.memory,
-        cpu=slime.cpu,
-        cloud=slime.cloud,
-        region=slime.region,
         volumes=all_volumes,
-        secrets=train_secrets or None,
-        ephemeral_disk=train_ephemeral_disk,
-        timeout=24 * 60 * 60,
-        # Retries exist for transient failures (preemption/NCCL), where a retry
-        # resumes from the last checkpoint. But a *deterministic* crash (esp.
-        # before the first save_interval checkpoint) re-runs from scratch and
-        # crashloops through every attempt — 10 wasted ~4h of a 40-GPU cluster on
-        # a step-1 crash. Cap low so a persistent failure surfaces fast.
-        retries=Retries(max_retries=slime.max_retries, initial_delay=0.0),
-        single_use_containers=True,
-        experimental_options=train_experimental_options or None,
-        serialized=True,
-        name="train",
+        **shared.training_function_options(
+            slime,
+            framework="slime",
+            secrets=train_secrets,
+            experimental_options={"efa_enabled": True},
+        ),
     )
     @clustered_if(_use_clustered, slime.total_nodes, gpu_type=slime.gpu_type)
     async def train(
@@ -969,31 +758,16 @@ def build_slime_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ):
-        modal_app_id = modal_app_id or os.environ.get("MODAL_APP_ID", "")
-        modal_app_url = modal_app_url or modal_app_dashboard_url(modal_app_id)
-
-        # Make the dashboard URL visible to both the launcher's own
-        # status_reporter and (via runtime_env below) the slime worker
-        # process. The toml file lives on the user's local machine and isn't
-        # accessible inside this container, so the URL has to be passed in.
-        if framework_status_url:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
-        if framework_status_token:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-
-        await asyncio.gather(
-            hf_cache_volume.reload.aio(),
-            data_volume.reload.aio(),
-            checkpoints_volume.reload.aio(),
+        cluster, modal_app_id, modal_app_url = await start_training_cluster(
+            slime,
+            (hf_cache_volume, data_volume, checkpoints_volume),
+            "SLIME_HOST_IP",
+            "SGLANG_HOST_IP",
+            modal_app_id=modal_app_id,
+            modal_app_url=modal_app_url,
+            framework_status_url=framework_status_url,
+            framework_status_token=framework_status_token,
         )
-
-        cluster = ModalRayCluster()
-        cluster.discover_cluster(slime.total_nodes)
-
-        os.environ["SLIME_HOST_IP"] = cluster.node_ip
-        os.environ["SGLANG_HOST_IP"] = cluster.node_ip
-        os.environ["HOST_IP"] = cluster.node_ip
-
         cluster.start_ray()
 
         if not cluster.is_head:
@@ -1003,52 +777,7 @@ def build_slime_app(
         # Fail fast on tracker access before the framework starts training.
         metric_entity = preflight_metric(slime.metrics)
 
-        metric_run_id = ""
-
         print(f"Training run id: {training_run_id}")
-        config_summary: dict = {
-            "model": {"model_name": model.model_name} if model else {},
-            # These fields are in _SLIME_SKIP, so _serialize_slime_params drops
-            # them; record them here so the run shows what it actually used.
-            "recipe": {
-                **_serialize_slime_params(
-                    slime,
-                    dataset=dataset,
-                    eval_dataset=eval_dataset,
-                    dataset_path=dataset_path,
-                    eval_dataset_path=eval_dataset_path,
-                    model=model,
-                ),
-                **{
-                    key: value
-                    for key, value in (
-                        ("slime_git_repository", slime.slime_git_repository),
-                        ("slime_git_revision", slime.slime_git_revision),
-                        ("data_volume_name", slime.data_volume_name),
-                    )
-                    if value
-                },
-            },
-            "metrics": metric_metadata(
-                slime.metrics,
-                entity=metric_entity,
-                run_id=metric_run_id,
-            ),
-            "dataset": {
-                "hf_repo": getattr(dataset, "hf_repo", ""),
-                "name": type(dataset).__name__,
-            },
-            "eval_dataset": (
-                {
-                    "hf_repo": getattr(eval_dataset, "hf_repo", ""),
-                    "name": type(eval_dataset).__name__,
-                }
-                if eval_dataset is not None
-                else None
-            ),
-            "lr": slime.lr,
-            "global_batch_size": slime.global_batch_size,
-        }
         (
             run_record,
             metric_run_id,
@@ -1056,11 +785,20 @@ def build_slime_app(
         ) = await init_training_run_record(
             training_run_id=training_run_id,
             modal_app_id=modal_app_id,
-            modal_app_url=modal_app_url or modal_app_dashboard_url(modal_app_id),
+            modal_app_url=modal_app_url,
             framework=Framework.SLIME,
             initializing_status=SlimeStatus.INITIALIZING,
-            config_summary=config_summary,
-            metric_cfg=slime.metrics,
+            recipe=slime,
+            model=model,
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            dataset_path=dataset_path,
+            eval_dataset_path=eval_dataset_path,
+            recipe_metadata=(
+                "slime_git_repository",
+                "slime_git_revision",
+                "data_volume_name",
+            ),
             metric_entity=metric_entity,
             framework_status_token=framework_status_token,
             checkpoint_dir=checkpoint_dir,
@@ -1068,66 +806,27 @@ def build_slime_app(
             checkpoints_mount_path=checkpoints_mount_path,
         )
 
-        try:  # Wraps all post-setup work so any failure marks the run terminal.
-            # In-flight status updates are fire-and-forget via the dashboard's
-            # /api/framework-status endpoint so the training thread doesn't pay
-            # the ~300ms volume-write latency on each transition. Terminal state
-            # (COMPLETED/FAILED/STOPPED) still goes through
-            # run_record.save(is_async=True) below to guarantee delivery
-            # before the container exits.
-            from modal_training_gym.common.status_reporter import (
-                enqueue_framework_status,
-            )
-
-            def _set_framework_status(status: SlimeStatus) -> None:
-                run_record.framework_status = status
-                enqueue_framework_status(
-                    training_run_id, status.value, token=framework_status_token
-                )
-
-            async def _set_framework_status_async(status: SlimeStatus) -> None:
-                _set_framework_status(status)
-
+        async with shared.training_run_lifecycle(
+            run_record, framework_status_token
+        ) as set_status:
             if model:
-                await _set_framework_status_async(SlimeStatus.DOWNLOAD_MODEL)
-                cache_dir = (
-                    HF_CACHE_PATH
-                    / "hub"
-                    / f"models--{model.model_name.replace('/', '--')}"
-                )
-                snapshots_dir = cache_dir / "snapshots"
-                has_snapshot = snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
-                if not has_snapshot:
-                    print(f"Downloading model {model.model_name}...")
-                model.download()  # Always run (idempotent; applies config patches to cached snapshots)
+                await set_status(SlimeStatus.DOWNLOAD_MODEL)
+                download_model_if_needed(model, always=True)
                 await hf_cache_volume.commit.aio()
 
             if dataset:
-                await _set_framework_status_async(SlimeStatus.PREPARE_DATASET)
-                wrote_data = write_dataset_if_needed(dataset, dataset_path)
-                if eval_dataset is not None and eval_dataset_path is not None:
-                    wrote_data = (
-                        write_dataset_if_needed(
-                            eval_dataset,
-                            eval_dataset_path,
-                        )
-                        or wrote_data
-                    )
-                if wrote_data:
+                await set_status(SlimeStatus.PREPARE_DATASET)
+                if write_datasets(
+                    dataset, eval_dataset, dataset_path, eval_dataset_path
+                ):
                     await data_volume.commit.aio()
 
-            await _set_framework_status_async(SlimeStatus.CONVERT_MODEL)
+            await set_status(SlimeStatus.CONVERT_MODEL)
             save_root = checkpoint_dir
             apply_scoped_save(slime, save_root)
             prepare_slime_config(slime, model, tempfile.mkdtemp())
 
             os.makedirs(save_root, exist_ok=True)
-
-            original_save = slime.save
-            original_load = slime.load
-            original_start_rollout_id = slime.start_rollout_id
-            original_ref_load = slime.ref_load
-            original_no_load_optim = slime.no_load_optim
 
             # Resolve the local HF snapshot dir (used for bridge-mode load below).
             _hf_ref: str | None = None
@@ -1146,37 +845,14 @@ def build_slime_app(
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
 
-            if resume_checkpoint is not None:
-                resume_from_iteration = resume_checkpoint.get("resume_from_iteration")
-                _validate_resume_checkpoint(resume_from_iteration, slime.num_rollout)
-                print(
-                    f"WARNING: detected existing checkpoint in "
-                    f"{resume_checkpoint['resume_checkpoint_path']}; "
-                    "resuming training from last saved iteration."
-                )
-                object.__setattr__(slime, "load", save_root)
-                # Continue from the iteration stored in the run's own checkpoint,
-                # even for runs launched with an explicit start_rollout_id.
-                object.__setattr__(slime, "start_rollout_id", None)
-                drop_materialized_config_key(slime, "start_rollout_id")
-                # This run's saves include Adam only when no_save_optim is false.
-                # TrainConfig.resume_from_checkpoint forces no_load_optim for the source seed;
-                # that flag is not a property of later saves in this directory.
-                if slime.no_save_optim and not slime.no_load_optim:
-                    print(
-                        "WARNING: no_save_optim=True — enabling no_load_optim for resume."
-                    )
-                object.__setattr__(slime, "no_load_optim", slime.no_save_optim)
-            elif (
-                slime.megatron_to_hf_mode == "bridge" and not slime.ref_load and _hf_ref
-            ):
-                # Fresh bridge run: load the HF weights directly via AutoBridge. slime falls back
-                # args.load -> args.ref_load, and _load_checkpoint_hf maps the HF dir into Megatron
-                # (weights only — no optimizer/RNG state, so no torch_dist is required). Pointing
-                # ref_load at a torch_dist here would instead trigger the full-resume path and fail
-                # on the missing optimizer state.
-                object.__setattr__(slime, "ref_load", _hf_ref)
-            try:
+            with shared.resumed_recipe(slime, save_root, resume_checkpoint):
+                if (
+                    resume_checkpoint is None
+                    and slime.megatron_to_hf_mode == "bridge"
+                    and not slime.ref_load
+                    and _hf_ref
+                ):
+                    object.__setattr__(slime, "ref_load", _hf_ref)
                 cmd = build_train_cmd(
                     slime,
                     SLIME_ROOT,
@@ -1185,24 +861,6 @@ def build_slime_app(
                     eval_dataset=eval_dataset,
                     dataset_path=dataset_path,
                     eval_dataset_path=eval_dataset_path,
-                )
-            finally:
-                object.__setattr__(slime, "save", original_save)
-                object.__setattr__(slime, "load", original_load)
-                object.__setattr__(slime, "start_rollout_id", original_start_rollout_id)
-                object.__setattr__(slime, "ref_load", original_ref_load)
-                object.__setattr__(slime, "no_load_optim", original_no_load_optim)
-
-            phase_report_url = (
-                os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")
-                or framework_status_url
-                or ""
-            )
-            if not phase_report_url:
-                print(
-                    "WARNING: no dashboard URL passed to train() and no "
-                    "TRAINING_GYM_FRAMEWORK_STATUS_URL set inside the "
-                    "container. Phase reporting is disabled for this run."
                 )
 
             runtime_env = {
@@ -1218,16 +876,9 @@ def build_slime_app(
                         if value
                     ),
                     "MASTER_ADDR": cluster.head_addr,
-                    "TRAINING_GYM_APP_NAME": app_name,
-                    "TRAINING_GYM_TOTAL_STEPS": str(slime.num_rollout),
-                    "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
-                    "TRAINING_GYM_CAPTURE_TRACE": (
-                        "1" if getattr(slime, "capture_trace", False) else ""
+                    **shared.training_reporting_env(
+                        slime, model, app_name, framework_status_url
                     ),
-                    "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
-                        getattr(slime, "trace_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                     "TRAINING_GYM_SUBSTEP_TIMING": slime.substep_timing,
                     **metric_runtime_env(
                         slime.metrics,
@@ -1249,63 +900,20 @@ def build_slime_app(
             print(f"Command: {cmd}")
             print(f"Runtime environment variables: {sorted(runtime_env['env_vars'])}")
 
-            await _set_framework_status_async(SlimeStatus.ROLLOUT_INITIALIZING)
+            await set_status(SlimeStatus.ROLLOUT_INITIALIZING)
             async with cluster.forward_dashboard() as tunnel:
                 print(f"Ray dashboard: {tunnel.url}")
                 result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
-                if not result.is_success:
-                    message = (
-                        result.message
-                        or f"Ray job finished with status: {result.status}"
-                    )
-                    error = RuntimeError(
-                        f"{message} (training_run_id={training_run_id})"
-                    )
-                    error.training_run_id = training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
-                    run_record.error_message = str(error)
-                    raise error
-                print(f"Ray job completed: {result.status}")
+                shared.check_training_result(result, run_record)
 
-            payload = persist_completed_run(
+            return await shared.complete_training_run(
                 run_record,
+                checkpoints_volume=checkpoints_volume,
                 app_name=app_name,
-                framework=Framework.SLIME,
-                training_run_id=training_run_id,
-                checkpoint_dir=save_root,
                 model=model,
-                checkpoints_volume_name=checkpoints_volume_name,
-                checkpoints_mount_path=checkpoints_mount_path,
-                metric_cfg=slime.metrics,
-                metric_entity=metric_entity,
-                metric_run_id=metric_run_id,
                 group_id=group_id,
             )
-            await save_train_result_blob(payload, is_async=True)
-            run_record.status = TrainingRunStatus.COMPLETED
-            mark_training_attempt_finished(
-                run_record, status="completed", ended_at=int(time.time())
-            )
-            await checkpoints_volume.commit.aio()
-            print(f"TrainingRun saved: {training_run_id}")
-            return payload
-        except KeyboardInterrupt:
-            mark_run_stopped(run_record)
-            raise
-        except BaseException as exc:
-            mark_run_failed(run_record, exc)
-            raise
-        finally:
-            latest_run_record = await build_terminal_run_record(
-                run_record, training_run_id
-            )
 
-            try:
-                await latest_run_record.save(is_async=True)
-            except Exception as exc:
-                print(f"Failed to save run record: {exc}")
-
-    app.download = download
-    app.prepare_dataset = prepare_dataset
     app.resolve_checkpoint = resolve_checkpoint
     app.convert_checkpoint = convert_checkpoint
     app.train = train

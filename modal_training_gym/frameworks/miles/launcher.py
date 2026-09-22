@@ -8,11 +8,10 @@ import shutil
 import tempfile
 import threading
 import time
-from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
-from modal import App, Dict as ModalDict, Image, Retries, Volume
+from modal import App, Dict as ModalDict, Image
 
 from modal_training_gym.common import (
     hf_secrets,
@@ -25,50 +24,40 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
 from modal_training_gym.common.launcher_utils import (
-    drop_materialized_config_key,
-    serialize_recipe_params,
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
     apply_metric_image,
-    metric_metadata,
     metric_runtime_env,
     metric_secrets,
     preflight_metric,
 )
-from modal_training_gym.common.modal_urls import modal_app_dashboard_url
 from modal_training_gym.common.models import ModelConfig
 from modal_training_gym.common.ray_cluster import (
-    ModalRayCluster,
     clustered_if,
 )
 from modal_training_gym.common.run import (
     TrainingRun,
-    TrainingRunStatus,
     has_torch_dist_checkpoint,
-    mark_training_attempt_finished,
     record_resume_checkpoint,
     torch_dist_resume_checkpoint,
 )
+from modal_training_gym.common import launcher_helpers as shared
 from modal_training_gym.common.launcher_helpers import (
-    apply_scoped_save,
-    build_app_tags,
-    build_terminal_run_record,
     compute_recipe_save_root,
+    build_app_tags,
+    apply_scoped_save,
     configured_recipe_save,
     init_training_run_record,
-    persist_completed_run,
-    mark_run_failed,
-    mark_run_stopped,
     mount_caller_source,
     resolve_caller_context,
-    resolve_checkpoint_volumes,
-    run_download_phase,
-    run_prepare_dataset,
-    ship_callable,
-    write_dataset_if_needed,
+    register_recipe_functions,
+    report_phase,
+    start_training_cluster,
+    download_model_if_needed,
+    write_datasets,
 )
-from modal_training_gym.common.train_result import save_train_result_blob
+from modal_training_gym.common.status_reporter import flush as flush_status_reporter
 from modal_training_gym.common.status import MilesStatus
 from modal_training_gym.common.torch_dist_checkpoint import (
     is_complete_torch_dist_checkpoint_dir,
@@ -87,22 +76,6 @@ from modal_training_gym.frameworks.miles.modal_helpers.utils import (
     prepare_miles_config,
     resolve_checkpoint_ref,
 )
-
-
-def _validate_resume_checkpoint(
-    resume_from_iteration: int | None, num_rollout: int
-) -> None:
-    if resume_from_iteration is not None and resume_from_iteration + 1 > num_rollout:
-        raise RuntimeError(
-            f"Resume would start at rollout {resume_from_iteration + 1}, "
-            f"but num_rollout={num_rollout}; nothing would run."
-        )
-    if resume_from_iteration is not None and resume_from_iteration + 1 == num_rollout:
-        print(
-            "WARNING: Resume checkpoint is already at the final configured "
-            "rollout; the retry will exit without running another rollout.",
-            flush=True,
-        )
 
 
 MILES_ROOT = "/root/miles"
@@ -336,9 +309,14 @@ def _unresumable_save_dirs(save_root: str) -> list[str]:
     )
 
 
-def _build_miles_base_image(miles: MilesRecipe) -> Image:
+def _build_miles_base_image(
+    recipe: MilesRecipe,
+    dataset: DatasetConfig | None = None,
+    eval_dataset: DatasetConfig | None = None,
+    caller_script: str | None = None,
+) -> Image:
     image = (
-        Image.from_registry(miles.docker_image)
+        Image.from_registry(recipe.docker_image)
         .entrypoint([])
         .run_commands(
             f"rm -rf {HF_CACHE_PATH} 2>/dev/null || true",
@@ -356,25 +334,66 @@ def _build_miles_base_image(miles: MilesRecipe) -> Image:
         )
     )
     if (
-        miles.total_nodes > 1
-        and not miles.colocate
-        and miles.environment.get("MILES_REINSTALL_RDMA", "1") != "0"
+        recipe.total_nodes > 1
+        and not recipe.colocate
+        and recipe.environment.get("MILES_REINSTALL_RDMA", "1") != "0"
     ):
         image = image.run_commands(RDMA_RUNTIME_INSTALL_COMMAND)
-    if miles.image_env:
-        image = image.env(miles.image_env)
+    if recipe.image_env:
+        image = image.env(recipe.image_env)
+
+    for patch_file in recipe.patch_files:
+        image = image.add_local_file(
+            patch_file,
+            remote_path=f"/tmp/{os.path.basename(patch_file)}",
+            copy=True,
+        )
+
+    if recipe.local_miles:
+        image = image.add_local_dir(
+            recipe.local_miles,
+            remote_path=MILES_ROOT,
+            copy=True,
+            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
+        )
+        image = image.run_commands(
+            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
+            " || echo 'WARNING: sglang abort patch did not apply to the"
+            " local_miles checkout; transient router failures during rollout"
+            " cleanup may crash the run'",
+            *_REPORTING_PATCH_COMMANDS,
+        )
+
+    image = apply_source_overlays(image, recipe)
+
+    if recipe.image_run_commands:
+        image = image.run_commands(*recipe.image_run_commands)
+
+    if recipe.image_overlay is not None:
+        image = recipe.image_overlay(image)
+        recipe.image_overlay = None
+
+    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
+        image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
+
+    image = apply_metric_image(image, recipe.metrics)
+    image = image.add_local_python_source("modal_training_gym", copy=True)
+    image = image.uv_pip_install("randomname")
+    image = mount_tools_dir(image)
+    image = mount_caller_source(image, caller_script)
+
+    image = shared.ship_recipe_callables(
+        image,
+        recipe,
+        caller_script=caller_script,
+        reward_post_process_in_config=False,
+    )
+
+    image = image.run_commands(
+        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
+    )
+
     return image
-
-
-def _response_parser_path(model: Any) -> str:
-    """Import path of the model's response parser so the rollout recorder can
-    resolve and apply it remotely. Empty when the model sets no parser."""
-    fn = getattr(model, "response_parser", None) if model is not None else None
-    if fn is None:
-        return ""
-    module = getattr(fn, "__module__", "")
-    qualname = getattr(fn, "__qualname__", "") or getattr(fn, "__name__", "")
-    return f"{module}.{qualname}" if module and qualname else ""
 
 
 def _compose_ld_library_path() -> str:
@@ -427,12 +446,6 @@ def build_ray_runtime_env(
 
 
 def apply_source_overlays(image: Image, miles: MilesRecipe) -> Image:
-    """Check out upstream sglang/miles refs over the image's own copies.
-
-    Lets a recipe train on support that landed after the last image build:
-    sglang is an editable install and miles is run from a source checkout, so
-    a checkout is all it takes as long as no compiled extension changed.
-    """
     if miles.sglang_git_ref:
         image = image.run_commands(
             f"cd {SGLANG_ROOT} && git fetch --depth=1 -- origin"
@@ -479,165 +492,24 @@ def build_miles_app(
 
     _caller_module, caller_script = resolve_caller_context()
 
-    image = _build_miles_base_image(miles)
+    image = _build_miles_base_image(miles, dataset, eval_dataset, caller_script)
 
-    for patch_file in miles.patch_files:
-        image = image.add_local_file(
-            patch_file,
-            remote_path=f"/tmp/{os.path.basename(patch_file)}",
-            copy=True,
-        )
-
-    if miles.local_miles:
-        image = image.add_local_dir(
-            miles.local_miles,
-            remote_path=MILES_ROOT,
-            copy=True,
-            ignore=["**/__pycache__", "**/*.pyc", "**/.git", "**/.venv"],
-        )
-        # The local checkout just overwrote the patched miles sources;
-        # re-apply the built-in patches.
-        image = image.run_commands(
-            f"echo {_PATCH_SGLANG_ABORT_B64} | base64 -d | python3"
-            " || echo 'WARNING: sglang abort patch did not apply to the"
-            " local_miles checkout; transient router failures during rollout"
-            " cleanup may crash the run'",
-            *_REPORTING_PATCH_COMMANDS,
-        )
-
-    image = apply_source_overlays(image, miles)
-
-    if miles.image_run_commands:
-        image = image.run_commands(*miles.image_run_commands)
-
-    if miles.image_overlay is not None:
-        image = miles.image_overlay(image)
-        miles.image_overlay = None
-
-    if isinstance(dataset, HarborDataset) or isinstance(eval_dataset, HarborDataset):
-        image = image.uv_pip_install(f"harbor=={HARBOR_PKG_VERSION}")
-
-    image = apply_metric_image(image, miles.metrics)
-    image = image.add_local_python_source("modal_training_gym", copy=True)
-    image = image.uv_pip_install("randomname")
-    image = mount_tools_dir(image)
-    image = mount_caller_source(image, caller_script)
-
-    def _set_custom_config_value(key: str, value: str) -> None:
-        cfg = dict(miles.extra_config or {})
-        cfg[key] = value
-        miles.extra_config = cfg
-
-    def _ship_callable(
-        fn: Any,
-        *,
-        fallback_name: str,
-        set_path: Callable[[str], None],
-    ) -> None:
-        nonlocal image
-        image = ship_callable(
-            image,
-            fn,
-            caller_script=caller_script,
-            fallback_name=fallback_name,
-            set_path=set_path,
-        )
-
-    # rm/generate paths live in the YAML custom-config; Miles reads the rest off
-    # dedicated --<name>-path flags, so those resolve back onto the field itself
-    # and MilesRecipe._fields emits them.
-    _ship_callable(
-        miles.custom_rm_function,
-        fallback_name="custom_rm",
-        set_path=lambda path: _set_custom_config_value("custom_rm_path", path),
-    )
-    _ship_callable(
-        miles.custom_generate_function,
-        fallback_name="custom_generate",
-        set_path=lambda path: _set_custom_config_value(
-            "custom_generate_function_path", path
-        ),
-    )
-    miles.custom_rm_function = None
-    miles.custom_generate_function = None
-
-    for attr, fallback_name in (
-        ("custom_reward_post_process_function", "custom_reward_post_process"),
-        ("rollout_function", "rollout_function"),
-    ):
-        value = getattr(miles, attr)
-        # A str is already an import path the user vouches for — nothing to ship.
-        if not callable(value):
-            continue
-        _ship_callable(
-            value,
-            fallback_name=fallback_name,
-            set_path=lambda path, attr=attr: object.__setattr__(miles, attr, path),
-        )
-
-    # The gym intercepts these four hooks for dashboard reporting: the CLI
-    # flag always points at the phase-reporting wrapper (MilesRecipe._fields),
-    # and the user's own hook rides along in the YAML custom-config under a
-    # `training_gym_*` key. Str paths were stashed there by the recipe
-    # validator; inline callables are shipped by value here and the stashed
-    # `__pending__` placeholder is overwritten with the resolved path.
-    for attr, config_key, fallback_name in (
-        (
-            "custom_rollout_log_function",
-            "training_gym_custom_rollout_log_function_path",
-            "custom_rollout_log",
-        ),
-        (
-            "custom_eval_rollout_log_function",
-            "training_gym_custom_eval_rollout_log_function_path",
-            "custom_eval_rollout_log",
-        ),
-        (
-            "custom_megatron_before_log_prob_hook",
-            "training_gym_custom_megatron_before_log_prob_hook_path",
-            "before_log_prob_hook",
-        ),
-        (
-            "custom_megatron_before_train_step_hook",
-            "training_gym_custom_megatron_before_train_step_hook_path",
-            "before_train_step_hook",
-        ),
-    ):
-        value = getattr(miles, attr)
-        if not callable(value):
-            continue
-        _ship_callable(
-            value,
-            fallback_name=fallback_name,
-            set_path=lambda path, key=config_key: _set_custom_config_value(key, path),
-        )
-        setattr(miles, attr, None)
-
-    image = image.run_commands(
-        f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
-    )
-
-    hf_cache_volume = Volume.from_name("huggingface-cache", create_if_missing=True)
-    data_volume = Volume.from_name(f"{volume_prefix}-data", create_if_missing=True)
-    checkpoints_volume_name, checkpoints_mount_path, checkpoints_volume = (
-        resolve_checkpoint_volumes(
+    checkpoints_volume_name, checkpoints_mount_path, all_volumes = (
+        shared.create_training_volumes(
             checkpoint,
             volume_prefix=volume_prefix,
-            default_mount_path=str(CHECKPOINTS_PATH),
         )
     )
+    hf_cache_volume = all_volumes[str(HF_CACHE_PATH)]
+    data_volume = all_volumes[str(DATA_PATH)]
+    checkpoints_volume = all_volumes[checkpoints_mount_path]
     checkpoint_dir = compute_recipe_save_root(
         miles,
-        recipe_default_save_root=str(CHECKPOINTS_PATH).rstrip("/"),
+        recipe_default_save_root=str(CHECKPOINTS_PATH),
         mounted_save_root=checkpoints_mount_path,
         training_run_id=training_run_id,
     )
     recorded_checkpoint_dir = checkpoint_dir if configured_recipe_save(miles) else ""
-    all_volumes: dict[str | PurePosixPath, Any] = {
-        str(HF_CACHE_PATH): hf_cache_volume,
-        str(DATA_PATH): data_volume,
-        checkpoints_mount_path: checkpoints_volume,
-    }
 
     tags = build_app_tags(
         framework="miles",
@@ -645,56 +517,29 @@ def build_miles_app(
         recipe_app_tags=miles.app_tags,
         metrics=miles.metrics,
     )
-
     app = App(app_name, tags=tags)
     gpu_spec = f"{miles.gpu_type}:{miles.gpu_allocation.gpus_per_node}"
 
-    @app.function(
-        image=image,
-        volumes={
-            str(HF_CACHE_PATH): hf_cache_volume,
-            checkpoints_mount_path: checkpoints_volume,
-        },
-        timeout=4 * 60 * 60,
-        secrets=[*hf_secrets(), *proxy_auth_secrets()],
-        serialized=True,
-        name="download",
-    )
-    def download(
-        training_run_id: str = "",
-        framework_status_url: str = "",
-        framework_status_token: str = "",
-    ):
-        def _download() -> None:
-            model.download()
-            miles.download_model()
-            miles.post_process_model()
+    def download_inputs() -> None:
+        model.download()
+        miles.download_model()
+        miles.post_process_model()
 
-        run_download_phase(
-            training_run_id=training_run_id,
-            phase=MilesStatus.DOWNLOAD_MODEL.value,
-            framework_status_url=framework_status_url,
-            framework_status_token=framework_status_token,
-            volumes=(hf_cache_volume, checkpoints_volume),
-            download=_download,
-        )
-
-    @app.function(
-        image=image,
-        volumes={str(DATA_PATH): data_volume},
-        timeout=4 * 60 * 60,
-        secrets=hf_secrets(),
-        serialized=True,
-        name="prepare_dataset",
+    register_recipe_functions(
+        app,
+        image,
+        hf_cache_volume=hf_cache_volume,
+        data_volume=data_volume,
+        checkpoints_volume=checkpoints_volume,
+        checkpoints_mount_path=checkpoints_mount_path,
+        download_phase=MilesStatus.DOWNLOAD_MODEL.value,
+        download=download_inputs,
+        download_timeout=4 * 60 * 60,
+        prepare_dataset=lambda: write_datasets(
+            dataset, eval_dataset, dataset_path, eval_dataset_path
+        ),
+        dataset_timeout=4 * 60 * 60,
     )
-    def prepare_dataset():
-        run_prepare_dataset(
-            dataset,
-            eval_dataset,
-            data_volume,
-            dataset_path,
-            eval_dataset_path,
-        )
 
     convert_nnodes, convert_nproc, _ = get_checkpoint_conversion_policy(
         miles, model=model
@@ -718,24 +563,16 @@ def build_miles_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ) -> str | None:
-        from modal_training_gym.common.status_reporter import (
-            enqueue_framework_status,
-            flush as flush_status_reporter,
+        report_phase(
+            training_run_id,
+            MilesStatus.CONVERT_MODEL.value,
+            framework_status_url,
+            framework_status_token,
         )
-
-        if training_run_id:
-            enqueue_framework_status(
-                training_run_id,
-                MilesStatus.CONVERT_MODEL.value,
-                url=framework_status_url or None,
-                token=framework_status_token or None,
-                is_active=True,
-            )
 
         if getattr(miles, "megatron_to_hf_mode", None) == "bridge":
             print("Bridge mode - no conversion needed.")
-            if training_run_id:
-                flush_status_reporter(timeout_seconds=2.0)
+            flush_status_reporter(timeout_seconds=2.0)
             return None
 
         hf_cache_volume.reload()
@@ -749,8 +586,7 @@ def build_miles_app(
                 f"Found existing torch_dist checkpoint at {save_path}; "
                 "skipping conversion."
             )
-            if training_run_id:
-                flush_status_reporter(timeout_seconds=2.0)
+            flush_status_reporter(timeout_seconds=2.0)
             return None
 
         holder = _acquire_convert_lock(
@@ -830,10 +666,6 @@ def build_miles_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ):
-        from modal_training_gym.common.status_reporter import (
-            flush as flush_status_reporter,
-        )
-
         save_path = str(miles.ref_load)
         num_nodes, nproc_per_node, extra_args = get_checkpoint_conversion_policy(
             miles, model=model
@@ -937,8 +769,7 @@ def build_miles_app(
                 )
             raise
 
-        if training_run_id:
-            flush_status_reporter(timeout_seconds=2.0)
+        flush_status_reporter(timeout_seconds=2.0)
 
     _multi_node = miles.total_nodes > 1
 
@@ -947,40 +778,16 @@ def build_miles_app(
         *hf_secrets(),
         *proxy_auth_secrets(),
     ]
-    train_experimental_options: dict[str, Any] = (
-        {"efa_enabled": True} if _multi_node else {}
-    )
-
-    train_function_kwargs = dict(miles.train_function_kwargs or {})
-    user_secrets = train_function_kwargs.pop("secrets", None)
-    if user_secrets is not None:
-        if not isinstance(user_secrets, (list, tuple)):
-            user_secrets = [user_secrets]
-        train_secrets.extend(user_secrets)
-    user_experimental_options = train_function_kwargs.pop("experimental_options", None)
-    if user_experimental_options is not None:
-        train_experimental_options.update(user_experimental_options)
-    train_ephemeral_disk = train_function_kwargs.pop("ephemeral_disk", None)
-    if train_function_kwargs:
-        unsupported = ", ".join(sorted(train_function_kwargs))
-        raise TypeError(f"Unsupported miles.train_function_kwargs keys: {unsupported}")
 
     @app.function(
         image=image,
-        gpu=gpu_spec,
-        memory=miles.memory,
-        cpu=miles.cpu,
-        ephemeral_disk=train_ephemeral_disk,
-        cloud=miles.cloud,
-        region=miles.region,
         volumes=all_volumes,
-        secrets=train_secrets,
-        timeout=24 * 60 * 60,
-        retries=Retries(max_retries=miles.max_retries, initial_delay=0.0),
-        single_use_containers=True,
-        experimental_options=train_experimental_options,
-        serialized=True,
-        name="train",
+        **shared.training_function_options(
+            miles,
+            framework="miles",
+            secrets=train_secrets,
+            experimental_options={"efa_enabled": True} if _multi_node else {},
+        ),
     )
     @clustered_if(
         _multi_node,
@@ -993,25 +800,16 @@ def build_miles_app(
         framework_status_url: str = "",
         framework_status_token: str = "",
     ):
-        modal_app_id = modal_app_id or os.environ.get("MODAL_APP_ID", "")
-        modal_app_url = modal_app_url or modal_app_dashboard_url(modal_app_id)
-        if framework_status_url:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_URL"] = framework_status_url
-        if framework_status_token:
-            os.environ["TRAINING_GYM_FRAMEWORK_STATUS_TOKEN"] = framework_status_token
-
-        await asyncio.gather(
-            hf_cache_volume.reload.aio(),
-            data_volume.reload.aio(),
-            checkpoints_volume.reload.aio(),
+        cluster, modal_app_id, modal_app_url = await start_training_cluster(
+            miles,
+            (hf_cache_volume, data_volume, checkpoints_volume),
+            "MILES_HOST_IP",
+            "SGLANG_HOST_IP",
+            modal_app_id=modal_app_id,
+            modal_app_url=modal_app_url,
+            framework_status_url=framework_status_url,
+            framework_status_token=framework_status_token,
         )
-
-        cluster = ModalRayCluster()
-        cluster.discover_cluster(miles.total_nodes)
-
-        os.environ["MILES_HOST_IP"] = cluster.node_ip
-        os.environ["SGLANG_HOST_IP"] = cluster.node_ip
-        os.environ["HOST_IP"] = cluster.node_ip
 
         prep_id = hashlib.sha1(training_run_id.encode("utf-8")).hexdigest()[:16]
         prep_marker = os.path.join(
@@ -1028,39 +826,6 @@ def build_miles_app(
             metric_entity = preflight_metric(miles.metrics)
 
             print(f"Training run id: {training_run_id}")
-            config_summary = {
-                "model": {"model_name": model.model_name} if model else {},
-                "recipe": {
-                    "gpu_type": miles.gpu_type,
-                    **serialize_recipe_params(
-                        miles,
-                        dataset=dataset,
-                        eval_dataset=eval_dataset,
-                        dataset_path=dataset_path,
-                        eval_dataset_path=eval_dataset_path,
-                        model=model,
-                    ),
-                },
-                "metrics": metric_metadata(
-                    miles.metrics,
-                    entity=metric_entity,
-                    run_id=metric_run_id,
-                ),
-                "dataset": {
-                    "hf_repo": getattr(dataset, "hf_repo", ""),
-                    "name": type(dataset).__name__,
-                },
-                "eval_dataset": (
-                    {
-                        "hf_repo": getattr(eval_dataset, "hf_repo", ""),
-                        "name": type(eval_dataset).__name__,
-                    }
-                    if eval_dataset is not None
-                    else None
-                ),
-                "lr": miles.lr,
-                "global_batch_size": miles.global_batch_size,
-            }
             (
                 run_record,
                 metric_run_id,
@@ -1071,8 +836,13 @@ def build_miles_app(
                 modal_app_url=modal_app_url,
                 framework=Framework.MILES,
                 initializing_status=MilesStatus.INITIALIZING,
-                config_summary=config_summary,
-                metric_cfg=miles.metrics,
+                recipe=miles,
+                model=model,
+                dataset=dataset,
+                eval_dataset=eval_dataset,
+                dataset_path=dataset_path,
+                eval_dataset_path=eval_dataset_path,
+                recipe_metadata=("gpu_type",),
                 metric_entity=metric_entity,
                 framework_status_token=framework_status_token,
                 checkpoint_dir=recorded_checkpoint_dir,
@@ -1080,82 +850,30 @@ def build_miles_app(
                 checkpoints_mount_path=checkpoints_mount_path,
             )
 
-        # In-flight status updates are fire-and-forget HTTP POSTs to the
-        # dashboard so they don't block on Modal Volume writes. Terminal
-        # state is committed synchronously below.
-        from modal_training_gym.common.status_reporter import (
-            enqueue_framework_status,
-        )
-
-        async def _set_framework_status(status: MilesStatus) -> None:
-            if run_record is None:
-                return
-            run_record.framework_status = status
-            enqueue_framework_status(
-                training_run_id, status.value, token=framework_status_token
-            )
-
         async def _prepare_shared_inputs() -> None:
-            await _set_framework_status(MilesStatus.DOWNLOAD_MODEL)
+            await set_status(MilesStatus.DOWNLOAD_MODEL)
             if model:
-                cache_dir = (
-                    HF_CACHE_PATH
-                    / "hub"
-                    / ("models--" + model.model_name.replace("/", "--"))
-                )
-                snapshots_dir = cache_dir / "snapshots"
-                has_snapshot = snapshots_dir.is_dir() and any(snapshots_dir.iterdir())
-                model_path = getattr(model, "model_path", None)
-                has_model_path = True
-                if model_path:
-                    model_path_obj = Path(model_path)
-                    has_model_path = model_path_obj.exists() and (
-                        not model_path_obj.is_dir() or any(model_path_obj.iterdir())
-                    )
-                if not has_snapshot or not has_model_path:
-                    print(f"Downloading model {model.model_name}...")
-                    model.download()
+                download_model_if_needed(model)
                 if hasattr(model, "prepare_runtime_cache"):
                     model.prepare_runtime_cache()
 
             miles.download_model()
-            await _set_framework_status(MilesStatus.CONVERT_MODEL)
+            await set_status(MilesStatus.CONVERT_MODEL)
             miles.post_process_model()
             await hf_cache_volume.commit.aio()
             await checkpoints_volume.commit.aio()
 
-            await _set_framework_status(MilesStatus.PREPARE_DATASET)
-            wrote_data = write_dataset_if_needed(dataset, dataset_path)
-            if eval_dataset is not None and eval_dataset_path is not None:
-                wrote_data = (
-                    write_dataset_if_needed(
-                        eval_dataset,
-                        eval_dataset_path,
-                    )
-                    or wrote_data
-                )
-            if wrote_data:
+            await set_status(MilesStatus.PREPARE_DATASET)
+            if write_datasets(dataset, eval_dataset, dataset_path, eval_dataset_path):
                 await data_volume.commit.aio()
 
         if cluster.is_head:
             try:
-                await _prepare_shared_inputs()
+                async with shared.training_run_lifecycle(
+                    run_record, framework_status_token
+                ) as set_status:
+                    await _prepare_shared_inputs()
             except BaseException as exc:
-                if run_record is not None:
-                    finished_at = int(time.time())
-                    run_record.status = TrainingRunStatus.FAILED
-                    run_record.error_message = (
-                        run_record.error_message or f"{type(exc).__name__}: {exc}"
-                    )
-                    mark_training_attempt_finished(
-                        run_record, status="failed", ended_at=finished_at
-                    )
-                    run_record.ended_at = finished_at
-                    run_record.completed_at = finished_at
-                    run_record.duration_seconds = max(
-                        0, finished_at - run_record.started_at
-                    )
-                    await run_record.save(is_async=True)
                 os.makedirs(os.path.dirname(prep_error), exist_ok=True)
                 with open(prep_error, "w") as f:
                     f.write(repr(exc))
@@ -1189,55 +907,29 @@ def build_miles_app(
             return
         assert run_record is not None
 
-        try:  # Wraps all post-setup work so any failure marks the run terminal.
+        async with shared.training_run_lifecycle(
+            run_record, framework_status_token
+        ) as set_status:
             save_root = checkpoint_dir
             apply_scoped_save(miles, save_root)
             prepare_miles_config(miles, model, tempfile.mkdtemp())
 
             os.makedirs(save_root, exist_ok=True)
 
-            original_save = miles.save
-            original_load = miles.load
-            original_start_rollout_id = miles.start_rollout_id
-            original_no_load_optim = miles.no_load_optim
-            miles.save = save_root if original_save else None
             resume_checkpoint = torch_dist_resume_checkpoint(
                 save_root, is_complete=_is_resumable_checkpoint
             )
             record_resume_checkpoint(run_record, resume_checkpoint)
             await run_record.save(is_async=True)
 
-            if resume_checkpoint is not None:
-                resume_from_iteration = resume_checkpoint.get("resume_from_iteration")
-                _validate_resume_checkpoint(resume_from_iteration, miles.num_rollout)
-                print(
-                    f"WARNING: detected existing checkpoint in "
-                    f"{resume_checkpoint['resume_checkpoint_path']}; "
-                    "resuming training from last saved iteration."
-                )
-                miles.load = save_root
-                # Continue from the iteration stored in the run's own checkpoint,
-                # even for runs launched with an explicit start_rollout_id.
-                miles.start_rollout_id = None
-                drop_materialized_config_key(miles, "start_rollout_id")
-                # This run's saves include Adam only when no_save_optim is false.
-                # TrainConfig.resume_from_checkpoint forces no_load_optim for the source seed;
-                # that flag is not a property of later saves in this directory.
-                if miles.no_save_optim and not miles.no_load_optim:
+            with shared.resumed_recipe(miles, save_root, resume_checkpoint):
+                if resume_checkpoint is None and (
+                    unresumable := _unresumable_save_dirs(save_root)
+                ):
                     print(
-                        "WARNING: no_save_optim=True — enabling no_load_optim for resume."
+                        f"WARNING: {save_root} holds saves of interrupted writes that cannot be resumed "
+                        f"({', '.join(unresumable)}). Resuming into one of these would load a partial save."
                     )
-                miles.no_load_optim = miles.no_save_optim
-            elif unresumable := _unresumable_save_dirs(save_root):
-                print(
-                    f"WARNING: {save_root} holds saves that cannot be resumed "
-                    f"({', '.join(unresumable)}) — they carry torch_dist shards "
-                    "without the .metadata written last, so they are interrupted "
-                    "writes. Training restarts from ref_load and their progress is "
-                    "discarded; Megatron follows latest_checkpointed_iteration.txt, "
-                    "so resuming into one of these would load a partial save."
-                )
-            try:
                 cmd = build_train_cmd(
                     miles,
                     MILES_ROOT,
@@ -1246,23 +938,6 @@ def build_miles_app(
                     eval_dataset=eval_dataset,
                     dataset_path=dataset_path,
                     eval_dataset_path=eval_dataset_path,
-                )
-            finally:
-                miles.save = original_save
-                miles.load = original_load
-                miles.start_rollout_id = original_start_rollout_id
-                miles.no_load_optim = original_no_load_optim
-
-            phase_report_url = (
-                os.environ.get("TRAINING_GYM_FRAMEWORK_STATUS_URL")
-                or framework_status_url
-                or ""
-            )
-            if not phase_report_url:
-                print(
-                    "WARNING: no dashboard URL passed to train() and no "
-                    "TRAINING_GYM_FRAMEWORK_STATUS_URL set inside the "
-                    "container. Phase reporting is disabled for this run."
                 )
 
             runtime_env = build_ray_runtime_env(
@@ -1276,17 +951,10 @@ def build_miles_app(
                 substep_timing=miles.substep_timing,
                 extra_env={
                     "TRAINING_GYM_TRAINING_RUN_ID": training_run_id,
-                    "TRAINING_GYM_APP_NAME": app_name,
                     "TRAINING_GYM_CHECKPOINTS_VOLUME_NAME": checkpoints_volume_name,
-                    "TRAINING_GYM_TOTAL_STEPS": str(miles.num_rollout),
-                    "TRAINING_GYM_RESPONSE_PARSER_PATH": _response_parser_path(model),
-                    "TRAINING_GYM_CAPTURE_TRACE": (
-                        "1" if getattr(miles, "capture_trace", False) else ""
+                    **shared.training_reporting_env(
+                        miles, model, app_name, framework_status_url
                     ),
-                    "TRAINING_GYM_TRACE_SAMPLE_LIMIT": str(
-                        getattr(miles, "trace_sample_limit", 16)
-                    ),
-                    "TRAINING_GYM_FRAMEWORK_STATUS_URL": phase_report_url,
                 },
                 framework_status_token=framework_status_token,
             )
@@ -1299,58 +967,19 @@ def build_miles_app(
             print(f"Command: {cmd}")
             print(f"Runtime environment variables: {sorted(runtime_env['env_vars'])}")
 
-            await _set_framework_status(MilesStatus.TRAINING)
+            await set_status(MilesStatus.TRAINING)
             result = await cluster.submit_and_tail(cmd, runtime_env=runtime_env)
-            if not result.is_success:
-                message = (
-                    result.message or f"Ray job finished with status: {result.status}"
-                )
-                error = RuntimeError(f"{message} (training_run_id={training_run_id})")
-                error.training_run_id = training_run_id  # pyright: ignore[reportAttributeAccessIssue]  # exception metadata is consumed by downstream callers
-                run_record.error_message = str(error)
-                raise error
-            print(f"Ray job completed: {result.status}")
+            shared.check_training_result(result, run_record)
             print(f"Ray job message: {result.message}")
 
-            payload = persist_completed_run(
+            return await shared.complete_training_run(
                 run_record,
+                checkpoints_volume=checkpoints_volume,
                 app_name=app_name,
-                framework=Framework.MILES,
-                training_run_id=training_run_id,
-                checkpoint_dir=recorded_checkpoint_dir,
                 model=model,
-                checkpoints_volume_name=checkpoints_volume_name,
-                checkpoints_mount_path=checkpoints_mount_path,
-                metric_cfg=miles.metrics,
-                metric_entity=metric_entity,
-                metric_run_id=metric_run_id,
                 group_id=group_id,
             )
-            await save_train_result_blob(payload, is_async=True)
-            run_record.status = TrainingRunStatus.COMPLETED
-            mark_training_attempt_finished(
-                run_record, status="completed", ended_at=int(time.time())
-            )
-            await checkpoints_volume.commit.aio()
-            print(f"TrainingRun saved: {training_run_id}")
-            return payload
-        except KeyboardInterrupt:
-            mark_run_stopped(run_record)
-            raise
-        except BaseException as exc:
-            mark_run_failed(run_record, exc)
-            raise
-        finally:
-            latest_run_record = await build_terminal_run_record(
-                run_record, training_run_id
-            )
-            try:
-                await latest_run_record.save(is_async=True)
-            except Exception:
-                pass
 
-    app.download = download
-    app.prepare_dataset = prepare_dataset
     app.resolve_checkpoint = resolve_checkpoint
     app.convert_checkpoint = convert_checkpoint
     app.train = train
