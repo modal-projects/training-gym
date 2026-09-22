@@ -11,9 +11,11 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -431,6 +433,29 @@ def _mixed_remote(
     return str(path), provenance
 
 
+def probe(root: Path):
+    config = runpy.run_path(str(Path(__file__).with_name("main.py")))["config"]
+    dataset = type(config.dataset)(root / "train-300.jsonl")
+    recipe = replace(
+        config.recipe,
+        num_rollout=0,
+        save=None,
+        save_interval=None,
+        n_samples_per_eval_prompt=8,
+        extra_config={**config.recipe.extra_config, "lr_decay_iters": 1},
+        eval_config={
+            "defaults": {
+                "n_samples_per_eval_prompt": 8,
+                "temperature": 1.0,
+                "top_p": 1.0,
+            },
+            "datasets": [{"name": "train-300", "path": str(dataset.path)}],
+        },
+    )
+    run = replace(config, dataset=dataset, recipe=recipe).train()
+    return run, recipe.save_debug_rollout_data.format(rollout_id="eval_0")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -498,8 +523,6 @@ def main() -> None:
             "Preparation did not produce train-300; at least 300 training tasks "
             "must remain after splitting. Increase or omit --limit."
         )
-
-    from tutorials.coding_agent.main import probe
 
     run, probe_dump = probe(Path(root))
     location = checkpoint_location(run)

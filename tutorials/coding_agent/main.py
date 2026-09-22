@@ -7,12 +7,10 @@
 # This tutorial trains [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B) on
 # [SWE-rebench V2](https://huggingface.co/datasets/nebius/SWE-rebench-V2).
 # During rollouts, the agent inspects repositories, edits code, and runs commands
-# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) using 
+# in a [Modal Sandbox](https://modal.com/docs/guide/sandboxes) using
 # [Harbor](https://docs.harborframework.com/).
 
 import json
-from dataclasses import replace
-
 from pathlib import Path
 from uuid import uuid4
 
@@ -71,7 +69,7 @@ class AgentTaskDataset(DatasetConfig):
                     yield json.loads(line)
 
 # ## Start training
-# 
+#
 # With the [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
 # recipe class, it's just that simple.
 
@@ -84,9 +82,6 @@ config = TrainConfig(
         slime_git_repository=SLIME_GIT_REPOSITORY,
         slime_git_revision=SLIME_GIT_REVISION,
         data_volume_name=DATA_VOLUME_NAME,
-        image_overlay=lambda image: image.add_local_dir(
-            Path(__file__).parent, "/root/tutorials/coding_agent", copy=True
-        ).env({"PYTHONPATH": "/root:/root/Megatron-LM/:/root/slime"}),
         memory=(1024, 2 * 1024 * 1024),
         train_function_kwargs={"ephemeral_disk": 2 * 1024 * 1024},
         environment={
@@ -180,28 +175,6 @@ config = TrainConfig(
         ),
     ),
 )
-
-def probe(root: Path):
-    dataset = AgentTaskDataset(root / "train-300.jsonl")
-    recipe = replace(
-        config.recipe,
-        num_rollout=0,
-        save=None,
-        save_interval=None,
-        n_samples_per_eval_prompt=8,
-        extra_config={**config.recipe.extra_config, "lr_decay_iters": 1},
-        eval_config={
-            "defaults": {
-                "n_samples_per_eval_prompt": 8,
-                "temperature": 1.0,
-                "top_p": 1.0,
-            },
-            "datasets": [{"name": "train-300", "path": str(dataset.path)}],
-        },
-    )
-    run = replace(config, dataset=dataset, recipe=recipe).train()
-    return run, recipe.save_debug_rollout_data.format(rollout_id="eval_0")
-
 
 if __name__ == "__main__":
     run = config.launch()
