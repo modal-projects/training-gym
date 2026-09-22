@@ -1,8 +1,7 @@
 """Prepare SWE-rebench tasks and train/eval subsets for the coding tutorial.
 
 Run with:
-uv run -m tutorials.coding_agent.dataset prepare
-uv run -m tutorials.coding_agent.dataset probe
+uv run -m tutorials.coding_agent.dataset
 """
 
 from __future__ import annotations
@@ -439,31 +438,17 @@ def main() -> None:
         default=DATASET_ROOT,
         help="Directory under /data holding the prepared tasks and subsets.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    prepare = subparsers.add_parser("prepare")
-    prepare.add_argument("--hf-revision")
-    prepare.add_argument(
+    parser.add_argument("--hf-revision")
+    parser.add_argument(
         "--min-grade",
         default="A",
         help="Keep rows whose meta.llm_metadata.code grade is this or better "
         "(A is best); 'none' keeps every row.",
     )
-    prepare.add_argument(
+    parser.add_argument(
         "--limit", type=int, help="Stop after converting this many tasks."
     )
 
-    probe_parser = subparsers.add_parser("probe")
-    probe_parser.add_argument("--replace", action="store_true")
-
-    mixed = subparsers.add_parser("mixed")
-    mixed.add_argument("--source", required=True)
-    mixed.add_argument("--recipe", default=DEFAULT_MIXED_RECIPE_SLUG)
-    mixed.add_argument("--probe-dump", required=True)
-    mixed.add_argument("--n-samples", type=int, default=8)
-    mixed.add_argument("--checkpoint", default="base")
-    mixed.add_argument("--checkpoints-volume", required=True)
-    mixed.add_argument("--replace", action="store_true")
     args = parser.parse_args()
 
     dataset_root = args.dataset_root
@@ -478,60 +463,49 @@ def main() -> None:
         )
     root = f"{DATA_PATH}/{dataset_root}"
 
-    if args.command == "probe":
-        from tutorials.coding_agent.main import probe
-
-        run, args.probe_dump = probe(Path(root))
-        location = checkpoint_location(run)
-        if location is None:
-            raise RuntimeError(
-                f"probe run {run.training_run_id} has no volume metadata"
-            )
-        args.checkpoints_volume = location[1]
-        args.source = "train-300"
-        args.recipe = DEFAULT_MIXED_RECIPE_SLUG
-        args.n_samples = 8
-        args.checkpoint = "base"
-
     volume_name = DATA_VOLUME_NAME
     app = modal.App("partition-swe-dataset")
     volumes = {
         str(DATA_PATH): modal.Volume.from_name(volume_name, create_if_missing=True)
     }
-    if args.command in {"mixed", "probe"}:
-        volumes["/checkpoints"] = modal.Volume.from_name(
-            args.checkpoints_volume, create_if_missing=False
-        )
     remote_options: dict[str, Any] = {
         "image": _image(),
         "volumes": volumes,
         "timeout": 24 * 60 * 60,
     }
-    if args.command == "prepare":
-        remote_options["secrets"] = hf_secrets()
-        remote = app.function(**remote_options)(_prepare_remote)
-        with app.run():
-            counts = remote.remote(
-                root,
-                converter_revision=SLIME_GIT_REVISION,
-                hf_revision=args.hf_revision,
-                min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
-                limit=args.limit,
-                volume_name=volume_name,
-            )
-        print("\n".join(f"{name}: {count}" for name, count in counts.items()))
-        return
+    remote = app.function(**remote_options, secrets=hf_secrets())(_prepare_remote)
+    with app.run():
+        counts = remote.remote(
+            root,
+            converter_revision=SLIME_GIT_REVISION,
+            hf_revision=args.hf_revision,
+            min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
+            limit=args.limit,
+            volume_name=volume_name,
+        )
+    print("\n".join(f"{name}: {count}" for name, count in counts.items()))
 
+    from tutorials.coding_agent.main import probe
+
+    run, probe_dump = probe(Path(root))
+    location = checkpoint_location(run)
+    if location is None:
+        raise RuntimeError(f"probe run {run.training_run_id} has no volume metadata")
+    volumes["/checkpoints"] = modal.Volume.from_name(
+        location[1], create_if_missing=False
+    )
+
+    app = modal.App("partition-swe-dataset")
     remote = app.function(**remote_options)(_mixed_remote)
     with app.run():
         path, provenance = remote.remote(
             root,
-            source=args.source,
-            recipe=args.recipe,
-            probe_dump=args.probe_dump,
-            n_samples=args.n_samples,
-            checkpoint=args.checkpoint,
-            replace=args.replace,
+            source="train-300",
+            recipe=DEFAULT_MIXED_RECIPE_SLUG,
+            probe_dump=probe_dump,
+            n_samples=8,
+            checkpoint="base",
+            replace=False,
             volume_name=volume_name,
         )
     print(f"{path}: {len(provenance['selected_instance_ids'])} rows")

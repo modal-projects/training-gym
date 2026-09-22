@@ -32,18 +32,17 @@ from tutorials.coding_agent.dataset import (
 # ## Get the dataset
 #
 # We must first convert SWE-rebench into Harbor tasks, and split/sample
-# the data to create balanced, repository-disjoint train/eval sets.
+# the data to create balanced, repository-disjoint train/eval sets. We also run
+# 8 episodes per task on 300 training tasks, without updating the model. We keep
+# tasks with a mix of successes and failures, so that we only train on tasks
+# with useful GRPO learning signal.
 # Since this is verbose, we have a
 # [separate preprocessing script](https://github.com/modal-projects/training-gym/blob/main/tutorials/coding_agent/dataset.py).
-# The probe runs 8 episodes per task on 300 training tasks, without updating
-# the model. We keep tasks with a mix of successes and failures, so that we only
-# train on tasks with useful GRPO learning signal.
 #
 # Run with:
 #
 # ```bash
-# uv run -m tutorials.coding_agent.dataset prepare
-# uv run -m tutorials.coding_agent.dataset probe
+# uv run -m tutorials.coding_agent.dataset
 # ```
 
 DATASET_ROOT = "swe_rebench_v2"
