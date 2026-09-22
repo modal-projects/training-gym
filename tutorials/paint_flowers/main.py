@@ -161,13 +161,14 @@ eval_dataset = FlowerPromptDataset(build_prompts(combos, N_EVAL))
 # to do pairwise comparisons. We serve the judge as an
 # [Endpoint](https://modal.com/docs/guide/endpoints).
 
-judge = Endpoint.launch(
-    Qwen3_6_27B(),
-    unauthenticated=True,
-    recreate_if_existing=True,
-)
-judge.wait_until_ready(timeout=30 * 60)
-helpers.launch_hpsv3()
+if __name__ == "__main__":
+    judge = Endpoint.launch(
+        Qwen3_6_27B(),
+        unauthenticated=True,
+        recreate_if_existing=True,
+    )
+    judge.wait_until_ready(timeout=30 * 60)
+    helpers.launch_hpsv3()
 
 
 async def flower_rm(args, sample, **kwargs) -> float | None:
@@ -218,5 +219,6 @@ config = TrainConfig(
     ),
 )
 
-run = config.launch()
-print(f"run id: {run.training_run_id}")
+if __name__ == "__main__":
+    run = config.launch()
+    print(f"run id: {run.training_run_id}")
