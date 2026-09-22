@@ -448,8 +448,15 @@ def main() -> None:
     parser.add_argument(
         "--limit", type=int, help="Stop after converting this many tasks."
     )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Convert and partition tasks without running the GPU probe.",
+    )
 
     args = parser.parse_args()
+    if not args.prepare_only and args.limit is not None and args.limit < 300:
+        parser.error("--limit must be at least 300 unless --prepare-only is set")
 
     dataset_root = args.dataset_root
     if (
@@ -484,6 +491,13 @@ def main() -> None:
             volume_name=volume_name,
         )
     print("\n".join(f"{name}: {count}" for name, count in counts.items()))
+    if args.prepare_only:
+        return
+    if counts.get("train-300") != 300:
+        raise RuntimeError(
+            "Preparation did not produce train-300; at least 300 training tasks "
+            "must remain after splitting. Increase or omit --limit."
+        )
 
     from tutorials.coding_agent.main import probe
 
@@ -505,7 +519,7 @@ def main() -> None:
             probe_dump=probe_dump,
             n_samples=8,
             checkpoint="base",
-            replace=False,
+            replace=True,
             volume_name=volume_name,
         )
     print(f"{path}: {len(provenance['selected_instance_ids'])} rows")
