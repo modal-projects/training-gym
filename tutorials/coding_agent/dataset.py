@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import os
 import re
 import runpy
@@ -270,7 +269,6 @@ def convert_tasks(
     *,
     hf_revision: str | None = None,
     min_grade: str | None = "A",
-    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     from datasets import load_dataset
 
@@ -284,8 +282,6 @@ def convert_tasks(
     rows = []
     skipped: Counter[str] = Counter()
     for row in source:
-        if limit is not None and len(rows) >= limit:
-            break
         if not swerebench._passes_quality(row, min_grade):
             skipped["quality grade"] += 1
             continue
@@ -319,12 +315,9 @@ def prepare_dataset(
     converter_revision: str,
     hf_revision: str | None = None,
     min_grade: str | None = "A",
-    limit: int | None = None,
 ) -> dict[str, int]:
     from huggingface_hub import HfApi
 
-    if limit is not None and limit < 1:
-        raise ValueError("limit must be positive")
     revision = HfApi().dataset_info(HF_DATASET, revision=hf_revision).sha
     if not revision:
         raise RuntimeError("could not resolve the dataset revision")
@@ -333,7 +326,7 @@ def prepare_dataset(
         staging = Path(temporary) / root.name
         staging.mkdir()
         rows = convert_tasks(
-            staging, hf_revision=revision, min_grade=min_grade, limit=limit
+            staging, hf_revision=revision, min_grade=min_grade
         )
         counts = write_partitions(staging, rows)
         write_text(
@@ -345,7 +338,6 @@ def prepare_dataset(
                     "revision": revision,
                     "translator_revision": converter_revision,
                     "min_grade": min_grade,
-                    "limit": limit,
                     "seed": SPLIT_SEED,
                     "eval_fraction": EVAL_SPLIT_FRACTION,
                 },
@@ -389,7 +381,6 @@ def _prepare_remote(
     converter_revision: str,
     hf_revision: str | None,
     min_grade: str | None,
-    limit: int | None,
     volume_name: str,
 ):
     counts = prepare_dataset(
@@ -397,7 +388,6 @@ def _prepare_remote(
         converter_revision=converter_revision,
         hf_revision=hf_revision,
         min_grade=min_grade,
-        limit=limit,
     )
     modal.Volume.from_name(volume_name).commit()
     return counts
@@ -471,22 +461,7 @@ def main() -> None:
         help="Keep rows whose meta.llm_metadata.code grade is this or better "
         "(A is best); 'none' keeps every row.",
     )
-    parser.add_argument(
-        "--limit", type=int, help="Stop after converting this many tasks."
-    )
-    parser.add_argument(
-        "--prepare-only",
-        action="store_true",
-        help="Convert and partition tasks without running the GPU probe.",
-    )
-
     args = parser.parse_args()
-    min_limit = math.ceil(300 / (1 - EVAL_SPLIT_FRACTION))
-    if not args.prepare_only and args.limit is not None and args.limit < min_limit:
-        parser.error(
-            f"--limit must be at least {min_limit} to allow for the eval split "
-            "unless --prepare-only is set"
-        )
 
     dataset_root = args.dataset_root
     if (
@@ -517,16 +492,13 @@ def main() -> None:
             converter_revision=SLIME_GIT_REVISION,
             hf_revision=args.hf_revision,
             min_grade=None if args.min_grade.lower() == "none" else args.min_grade,
-            limit=args.limit,
             volume_name=volume_name,
         )
     print("\n".join(f"{name}: {count}" for name, count in counts.items()))
-    if args.prepare_only:
-        return
     if counts.get("train-300") != 300:
         raise RuntimeError(
             "Preparation did not produce train-300; at least 300 training tasks "
-            "must remain after splitting. Increase or omit --limit."
+            "must remain after splitting."
         )
 
     run, probe_dump = probe(Path(root))
