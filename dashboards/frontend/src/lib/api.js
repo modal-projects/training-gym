@@ -74,31 +74,9 @@ export async function fetchRun(trainingRunId, { signal } = {}) {
   return await readJson(res, "run detail");
 }
 
-export async function fetchEvals({ signal } = {}) {
-  const res = await fetch(`${SERVER}/evals`, { signal });
-  if (!res.ok) {
-    throw new Error(await getErrorFromResponse(res));
-  }
-  const evals = await readJson(res, "evals");
-  const seen = new Set();
-  return evals.filter((e) => {
-    if (seen.has(e.eval_id)) return false;
-    seen.add(e.eval_id);
-    return true;
-  });
-}
-
 export async function fetchTrainResult(trainingRunId) {
   const res = await fetch(
     `${SERVER}/train-results/${encodeURIComponent(trainingRunId)}`
-  );
-  if (!res.ok) return null;
-  return await res.json();
-}
-
-export async function fetchEvalDetail(evalId) {
-  const res = await fetch(
-    `${SERVER}/evals/${encodeURIComponent(evalId)}`
   );
   if (!res.ok) return null;
   return await res.json();

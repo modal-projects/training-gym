@@ -1,21 +1,16 @@
 <script>
   import { onMount } from "svelte";
-  import { Book, CheckCircle2, Zap } from "lucide-svelte";
+  import { Book } from "lucide-svelte";
   import "./app.css";
-  import Sidebar from "./components/Sidebar.svelte";
   import DashboardHeader from "./components/DashboardHeader.svelte";
   import TrainingPage from "./pages/TrainingPage.svelte";
   import TrainingRunDetailPage from "./pages/TrainingRunDetailPage.svelte";
-  import EvalsPage from "./pages/EvalsPage.svelte";
   import {
     fetchRuns,
     fetchRunCounts,
-    fetchEvals,
-    fetchEvalDetail,
   } from "./lib/api.js";
   import logoSvg from "./lib/logo.svg";
   import { fmtDuration } from "./lib/format.js";
-  import { createSidebarCollapsedState } from "./lib/sidebarCollapsed.svelte.js";
 
   const DOCS_URL = "https://gym.modal.dev";
 
@@ -31,9 +26,7 @@
     recipe: {},
     group: {},
   });
-  let allEvals = $state([]);
   let loading = $state(true);
-  let loadingEvals = $state(false);
   let error = $state(null);
   let search = $state("");
   let activeRecipes = $state(new Set());
@@ -47,7 +40,6 @@
   let seenStatuses = new Set();
   let seenGroups = new Set();
   let activePage = $state("training");
-  const sidebar = createSidebarCollapsedState();
   let activeTrainingRunId = $state(null);
   // When set (and no full detail page is open), the training list shows a
   // summary drawer for this run — set by "Collapse" on the detail page.
@@ -59,24 +51,14 @@
   let runsRequestId = 0;
   let hasLoadedRuns = false;
   let initialRunsLoadStarted = false;
-  let evalsRequestId = 0;
-  let hasLoadedEvals = $state(false);
 
   const pageMeta = {
     training: { title: "Training runs" },
-    evals: { title: "Evals" },
   };
 
   const pagePaths = {
     training: "/training",
-    evals: "/evals",
   };
-
-  function pageFromPath(pathname) {
-    if (pathname === "/" || pathname.startsWith("/training")) return "training";
-    if (pathname.startsWith("/evals")) return "evals";
-    return "training";
-  }
 
   function runIdFromPath(pathname) {
     if (!pathname.startsWith("/training/")) return null;
@@ -84,46 +66,21 @@
     return tail ? decodeURIComponent(tail) : null;
   }
 
-  const navItems = [
-    { key: "training", label: "Training runs", Icon: Zap, path: pagePaths.training },
-    { key: "evals", label: "Evals", Icon: CheckCircle2, path: pagePaths.evals },
-  ];
-
   if (typeof window !== "undefined") {
-    activePage = pageFromPath(window.location.pathname);
     activeTrainingRunId = runIdFromPath(window.location.pathname);
   }
 
   onMount(() => {
     const syncPageWithPath = () => {
-      activePage = pageFromPath(window.location.pathname);
       activeTrainingRunId = runIdFromPath(window.location.pathname);
     };
 
     if (window.location.pathname === "/") {
       window.history.replaceState({}, "", pagePaths.training);
-    } else {
-      syncPageWithPath();
     }
+    syncPageWithPath();
 
     window.addEventListener("popstate", syncPageWithPath);
-
-    // Cmd/Ctrl+B toggles the sidebar, except while typing in a field.
-    const onKeyDown = (event) => {
-      if (event.key.toLowerCase() !== "b" || !(event.metaKey || event.ctrlKey)) return;
-      if (event.altKey || event.shiftKey || event.defaultPrevented) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
-      ) {
-        return;
-      }
-      event.preventDefault();
-      sidebar.toggle();
-    };
-    window.addEventListener("keydown", onKeyDown);
 
     // Auto-refresh the active page's data every 5s so running training runs,
     // their status/stage and rollouts stay live. Current data stays on screen
@@ -163,7 +120,6 @@
 
     return () => {
       window.removeEventListener("popstate", syncPageWithPath);
-      window.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       stopPolling();
     };
@@ -358,24 +314,6 @@
     }
   }
 
-  async function loadEvals() {
-    const requestId = ++evalsRequestId;
-    const isStale = () => requestId !== evalsRequestId;
-
-    if (!allEvals.length) loadingEvals = true;
-    try {
-      const evals = await fetchWithTimeout(fetchEvals, 15000, "evals");
-      if (isStale()) return;
-      allEvals = evals;
-      hasLoadedEvals = true;
-    } catch (reason) {
-      if (isStale()) return;
-      if (!allEvals.length) allEvals = [];
-      console.warn(getErrorMessage(reason));
-    }
-    if (!isStale()) loadingEvals = false;
-  }
-
   let reloadQueued = false;
 
   // `queue`: this load asks for data the current one won't return (a new query
@@ -399,11 +337,7 @@
     try {
       do {
         reloadQueued = false;
-        const tasks = [loadRuns()];
-        if (activePage === "evals") {
-          tasks.push(loadEvals());
-        }
-        await Promise.all(tasks);
+        await loadRuns();
       } while (reloadQueued);
     } finally {
       refreshing = false;
@@ -420,9 +354,6 @@
       void loadRuns();
     } else if (activeTrainingRunId && !hasLoadedRuns) {
       loading = false;
-    }
-    if (activePage === "evals" && !hasLoadedEvals) {
-      void loadEvals();
     }
   });
 
@@ -510,227 +441,6 @@
     totalRuns - completedTotal - cancelledTotal - stoppedTotal - failedTotal,
   );
 
-  function evalAccuracy(ev) {
-    if (typeof ev.mean === "number") return ev.mean;
-    const rows = ev.rows || [];
-    if (!rows.length) return 0;
-    return rows.reduce((sum, row) => sum + (row.score || 0), 0) / rows.length;
-  }
-
-  function evalCreatedAt(ev) {
-    const raw = ev?.created_at;
-    if (raw && typeof raw === "object" && "value" in raw) {
-      return evalCreatedAt({ created_at: raw.value });
-    }
-    if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
-    const text = safeText(raw).trim();
-    if (!text) return 0;
-    const numeric = Number(text);
-    if (Number.isFinite(numeric)) return numeric;
-    const epochMs = Date.parse(text);
-    if (Number.isFinite(epochMs)) return Math.floor(epochMs / 1000);
-    return 0;
-  }
-
-  // Maps a raw eval status onto a coarse filter/count bucket
-  // ("Completed" | "Pending" | "Failed"), the StatusPill color/icon variant,
-  // and a human label for the four eval phases.
-  function getEvalDisplay(ev) {
-    const rawStatus = safeText(ev.status).toLowerCase();
-    if (rawStatus === "deploying_model" || rawStatus === "deploying") {
-      return { bucket: "Pending", pill: "running", label: "Deploying model" };
-    }
-    if (
-      rawStatus === "running_eval" ||
-      rawStatus === "running" ||
-      rawStatus === "pending" ||
-      rawStatus === "queued" ||
-      rawStatus === "initializing"
-    ) {
-      return { bucket: "Pending", pill: "running", label: "Running eval" };
-    }
-    if (
-      rawStatus === "completed" ||
-      rawStatus === "success" ||
-      rawStatus === "succeeded"
-    ) {
-      return { bucket: "Completed", pill: "completed", label: "Success" };
-    }
-    if (rawStatus === "failed" || rawStatus === "error") {
-      return { bucket: "Failed", pill: "failed", label: "Failed" };
-    }
-    const total = ev.total ?? (Array.isArray(ev.rows) ? ev.rows.length : 0);
-    if (total > 0) {
-      return { bucket: "Completed", pill: "completed", label: "Success" };
-    }
-    return { bucket: "Pending", pill: "running", label: "Pending" };
-  }
-
-  function getEvalStatus(ev) {
-    return getEvalDisplay(ev).bucket;
-  }
-
-  function normalizeConfigValue(value) {
-    if (value && typeof value === "object" && "value" in value) {
-      return normalizeConfigValue(value.value);
-    }
-    if (Array.isArray(value)) {
-      return value.map((item) => normalizeConfigValue(item));
-    }
-    if (value && typeof value === "object") {
-      return Object.keys(value)
-        .sort()
-        .reduce((acc, key) => {
-          acc[key] = normalizeConfigValue(value[key]);
-          return acc;
-        }, {});
-    }
-    return value ?? null;
-  }
-
-  function evalConfigKey(ev) {
-    return JSON.stringify(normalizeConfigValue(ev.config || {}));
-  }
-
-  function evalConfigMeta(config, ev = null) {
-    const evalConfig = ev?.eval_config || {};
-    const sourceConfig = ev?.config || {};
-    const dataset =
-      safeText(config?.dataset?.name) ||
-      safeText(config?.dataset?.hf_repo) ||
-      safeText(config?.dataset?.prompt_data) ||
-      safeText(config?.dataset_name) ||
-      safeText(sourceConfig?.dataset?.name) ||
-      safeText(sourceConfig?.dataset?.hf_repo) ||
-      safeText(sourceConfig?.dataset?.prompt_data) ||
-      safeText(sourceConfig?.dataset_name) ||
-      safeText(evalConfig?.dataset_name) ||
-      safeText(ev?.dataset_name) ||
-      "—";
-    const model = safeText(ev?.model_name) || "—";
-    const split =
-      safeText(config?.dataset?.split) ||
-      safeText(sourceConfig?.dataset?.split) ||
-      safeText(evalConfig?.dataset?.split);
-    const judge =
-      safeText(config?.judge?.model_name) ||
-      safeText(config?.judge_model_name) ||
-      safeText(sourceConfig?.judge?.model_name) ||
-      safeText(sourceConfig?.judge_model_name) ||
-      safeText(evalConfig?.judge?.model_name) ||
-      safeText(evalConfig?.judge_model_name) ||
-      "";
-    const evalFn =
-      safeText(config?.eval_fn_name) ||
-      safeText(config?.grader_name) ||
-      safeText(sourceConfig?.eval_fn_name) ||
-      safeText(sourceConfig?.grader_name) ||
-      safeText(evalConfig?.eval_fn_name) ||
-      safeText(evalConfig?.grader_name) ||
-      safeText(ev?.eval_fn_name) ||
-      "";
-    return { dataset, model, split, judge, evalFn };
-  }
-
-  let sortedEvals = $derived(
-    [...allEvals].sort((a, b) => evalCreatedAt(b) - evalCreatedAt(a)),
-  );
-
-  let evalConfigGroups = $derived.by(() => {
-    const groups = new Map();
-    for (const ev of sortedEvals) {
-      const key = safeText(ev.eval_config_id).trim() || evalConfigKey(ev);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          key,
-          evalConfigId: key,
-          config: ev.config || {},
-          runs: [],
-          latestCreatedAt: 0,
-        });
-      }
-      const group = groups.get(key);
-      const createdAt = evalCreatedAt(ev);
-      if (
-        (!group.config || Object.keys(group.config).length === 0) &&
-        ev.config &&
-        Object.keys(ev.config).length > 0
-      ) {
-        group.config = ev.config;
-      }
-      const avgScore = evalAccuracy(ev);
-      const totalRows = ev.total ?? (ev.rows || []).length;
-      const display = getEvalDisplay(ev);
-      group.runs.push({
-        eval: ev,
-        avgScore,
-        totalRows,
-        status: display.bucket,
-        pillStatus: display.pill,
-        statusLabel: display.label,
-        createdAt,
-      });
-      group.latestCreatedAt = Math.max(group.latestCreatedAt, createdAt);
-    }
-
-    return [...groups.values()]
-      .map((group) => {
-        const sortedRuns = [...group.runs].sort(
-          (a, b) =>
-            b.createdAt - a.createdAt ||
-            b.avgScore - a.avgScore,
-        );
-        const totalEvals = sortedRuns.length;
-        const totalExamples = sortedRuns.reduce(
-          (sum, run) => sum + run.totalRows,
-          0,
-        );
-        const weightedScoreTotal = sortedRuns.reduce(
-          (sum, run) => sum + run.avgScore * run.totalRows,
-          0,
-        );
-        const bestScore = sortedRuns[0]?.avgScore ?? 0;
-        const avgAccuracy =
-          totalExamples > 0
-            ? weightedScoreTotal / totalExamples
-            : totalEvals > 0
-              ? sortedRuns.reduce((sum, run) => sum + run.avgScore, 0) / totalEvals
-              : 0;
-        const completedCount = sortedRuns.filter(
-          (run) => run.status === "Completed",
-        ).length;
-        const pendingCount = sortedRuns.filter(
-          (run) => run.status === "Pending",
-        ).length;
-        const failedCount = sortedRuns.filter((run) => run.status === "Failed").length;
-        return {
-          ...group,
-          meta: evalConfigMeta(group.config, sortedRuns[0]?.eval),
-          bestScore,
-          totalEvals,
-          avgAccuracy,
-          completedCount,
-          pendingCount,
-          failedCount,
-          runs: sortedRuns,
-        };
-      })
-      .sort(
-        (a, b) =>
-          (b.latestCreatedAt || 0) - (a.latestCreatedAt || 0) ||
-          b.runs.length - a.runs.length,
-      );
-  });
-
-  let evalCompletedTotal = $derived(
-    allEvals.filter((ev) => getEvalStatus(ev) === "Completed").length,
-  );
-  let evalPendingTotal = $derived(
-    allEvals.filter((ev) => getEvalStatus(ev) === "Pending").length,
-  );
-  let evalFailedTotal = $derived(
-    allEvals.filter((ev) => getEvalStatus(ev) === "Failed").length,
-  );
   let activeTrainingRun = $derived(
     runs.find((run) => run.run_id === activeTrainingRunId) || null,
   );
@@ -738,10 +448,7 @@
   let statusText = $derived.by(() => {
     if (activePage === "training" && activeTrainingRunId) return "run details";
     if (activePage === "training" && loading) return "loading...";
-    if (activePage === "evals" && loadingEvals) return "loading...";
     if (error) return "error";
-    if (activePage === "evals")
-      return `${allEvals.length} eval${allEvals.length === 1 ? "" : "s"}`;
     if (!totalRuns) return "0 runs";
     return `${matchingRunCount} of ${totalRuns} runs`;
   });
@@ -789,17 +496,6 @@
 
   function clearGroups() {
     activeGroups = new Set();
-  }
-
-  function setActivePage(page) {
-    activePage = page;
-    activeTrainingRunId = null;
-    drawerRunId = null;
-    if (typeof window === "undefined") return;
-    const targetPath = pagePaths[page] || pagePaths.training;
-    if (window.location.pathname !== targetPath) {
-      window.history.pushState({}, "", targetPath);
-    }
   }
 
   function backToTrainingList() {
@@ -858,29 +554,13 @@
     </a>
   </header>
 
-  <div
-    class={[
-      "grid min-h-0 h-full bg-(--bg) transition-[grid-template-columns] duration-100 ease-out max-[900px]:grid-cols-[1fr] max-[900px]:grid-rows-[auto_minmax(0,1fr)]",
-      sidebar.collapsed
-        ? "grid-cols-[56px_minmax(0,1fr)]"
-        : "grid-cols-[232px_minmax(0,1fr)]",
-    ]}
-  >
-    <Sidebar
-      {navItems}
-      {activePage}
-      onNavigate={setActivePage}
-      collapsed={sidebar.collapsed}
-      onToggleCollapsed={() => sidebar.toggle()}
+  <main class="min-w-0 min-h-0 h-full flex flex-col overflow-y-auto bg-(--bg)">
+    <DashboardHeader
+      title={pageMeta[activePage].title}
+      {statusText}
+      {refreshing}
+      onRefresh={() => load()}
     />
-
-    <main class="min-w-0 min-h-0 h-full flex flex-col overflow-y-auto">
-      <DashboardHeader
-        title={pageMeta[activePage].title}
-        {statusText}
-        {refreshing}
-        onRefresh={() => load()}
-      />
 
     {#if activePage === "training" && activeTrainingRunId}
       <TrainingRunDetailPage
@@ -936,20 +616,6 @@
         onSelectAllGroups={selectAllGroups}
         onClearGroups={clearGroups}
       />
-    {:else if activePage === "evals"}
-      <EvalsPage
-        {allEvals}
-        {evalCompletedTotal}
-        {evalPendingTotal}
-        {evalFailedTotal}
-        loading={loadingEvals}
-        {error}
-        {evalConfigGroups}
-        {fetchEvalDetail}
-        {getEvalDisplay}
-        {evalConfigMeta}
-      />
     {/if}
-    </main>
-  </div>
+  </main>
 </div>
