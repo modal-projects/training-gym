@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import datetime
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
+import modal
 from pydantic import BaseModel, Field, model_validator
 
 from modal_training_gym._api_reference import exclude_from_api_reference
@@ -16,6 +17,7 @@ from modal_training_gym.common.ids import create_hash
 from modal_training_gym.utils.metadata import MetadataStore, vol_get, vol_put
 
 from modal_training_gym.common.sample import Sample
+from modal_training_gym.common.sandbox import Sandbox
 
 if TYPE_CHECKING:
     from modal_training_gym.common.dataset import DatasetConfig
@@ -520,8 +522,6 @@ def score_in_sandbox(
     memory_policy: str = "limit",
 ) -> tuple[float, dict[str, Any]]:
     """Run code against test cases in a Modal sandbox."""
-    import modal
-
     if not test_cases:
         return 0.0, {"error": "no test cases"}
 
@@ -557,9 +557,6 @@ def score_in_sandbox(
         ]
     )
 
-    app = modal.App.lookup("training-gym-sandbox-rm", create_if_missing=True)
-    image = modal.Image.debian_slim(python_version=python_version)
-
     resource_kwargs: dict[str, Any] = {}
     cpu_arg = _sandbox_resource(sandbox_cpu, cpu_policy, _MODAL_DEFAULT_CPU_REQUEST)
     if cpu_arg is not None:
@@ -570,29 +567,22 @@ def score_in_sandbox(
     if memory_arg is not None:
         resource_kwargs["memory"] = memory_arg
 
-    sb = modal.Sandbox._experimental_create(
-        "python",
-        "-c",
-        runner,
-        cases_payload,
-        image=image,
+    with Sandbox(
+        image=modal.Image.debian_slim(python_version=python_version),
         timeout=timeout_sec,
-        app=app,
+        app_name="training-gym-sandbox-rm",
         **resource_kwargs,
-    )
-    sb.wait()
+    ) as sb:
+        result = sb.run("python", "-c", runner, cases_payload, timeout=timeout_sec)
 
-    stdout = sb.stdout.read()
-    stderr = sb.stderr.read()
-
-    metadata: dict[str, Any] = {"stderr": stderr}
+    metadata: dict[str, Any] = {"stderr": result.stderr}
     try:
-        results = json.loads(stdout)
+        results = json.loads(result.stdout)
         passed = sum(1 for r in results if r.get("passed"))
         metadata["per_case"] = results
         return passed / len(test_cases), metadata
     except (json.JSONDecodeError, TypeError):
-        metadata["raw_stdout"] = stdout
+        metadata["raw_stdout"] = result.stdout
         return 0.0, metadata
 
 

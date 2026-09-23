@@ -144,6 +144,8 @@ Repo: https://github.com/modal-projects/training-gym
 
 - [CustomDeployment](https://gym.modal.dev/reference/customdeployment)
 - [Endpoint](https://gym.modal.dev/reference/endpoint)
+- [Sandbox](https://gym.modal.dev/reference/sandbox)
+- [SandboxResult](https://gym.modal.dev/reference/sandboxresult)
 - [SglangRecipe](https://gym.modal.dev/reference/sglangrecipe)
 - [VllmRecipe](https://gym.modal.dev/reference/vllmrecipe)
 

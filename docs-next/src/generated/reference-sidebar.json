@@ -81,6 +81,14 @@
       "link": "/reference/sample"
     },
     {
+      "label": "Sandbox",
+      "link": "/reference/sandbox"
+    },
+    {
+      "label": "SandboxResult",
+      "link": "/reference/sandboxresult"
+    },
+    {
       "label": "SglangRecipe",
       "link": "/reference/sglangrecipe"
     },
