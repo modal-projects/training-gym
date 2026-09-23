@@ -5,18 +5,10 @@ import json
 import os
 from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import cache
 from typing import Any, Callable
-
-from transformers import AutoTokenizer
 
 from modal_training_gym.common.dataset import DatasetConfig
 from modal_training_gym.common.models.base import ToolCall
-
-
-@cache
-def _tokenizer(name: str):
-    return AutoTokenizer.from_pretrained(name, trust_remote_code=True)
 
 
 @dataclass

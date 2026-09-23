@@ -22,13 +22,13 @@ import json
 import re
 import sys
 import time
+from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from env import (
     BfclMultiTurnConfig,
     BfclMultiTurnDataset,
-    _tokenizer,
     build_env,
     build_prefix_messages,
     prefix_turn_index,
@@ -56,53 +56,51 @@ STUDENT_READY_TIMEOUT = 15 * 60
 TEACHER_READY_TIMEOUT = 30 * 60
 
 student_model = Qwen3_6_35B()
-if __name__ == "__main__":
-    base_student_deployment = Endpoint.launch(
-        student_model, unauthenticated=True, recreate_if_existing=True
-    )
+base_student_deployment = Endpoint.launch(
+    student_model, unauthenticated=True, recreate_if_existing=True
+)
 
-    teacher_model = HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash")
-    teacher_deployment = CustomDeployment.launch(
-        teacher_model,
-        recipe=SglangRecipe(
-            gpu="B200",
-            tp=4,
-            dp=4,
-            context_length=16384,
-            mem_fraction_static=0.85,
-            chunked_prefill_size=4096,
-            max_running_requests=64,
-            sglang_image="lmsysorg/sglang:v0.5.12.post1-cu130",
-            install_transformers_from_git=False,
-            env_vars={
-                "NCCL_CUMEM_ENABLE": "1",
-                "SGLANG_OPT_DEEPGEMM_MEGA_MOE_NUM_MAX_TOKENS_PER_RANK": "8320",
-                "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_FP4_ACTS": "1",
-                "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_MXF4_KIND": "1",
-            },
-            extra_server_args={
-                "--trust-remote-code": "",
-                "--moe-a2a-backend": "megamoe",
-                "--enable-breakable-cuda-graph": "",
-                "--enable-mixed-chunk": "",
-                "--piecewise-cuda-graph-max-tokens": "4096",
-                "--tool-call-parser": "deepseekv4",
-                "--reasoning-parser": "deepseek-v4",
-            },
-            startup_timeout=TEACHER_READY_TIMEOUT,
-        ),
-        app_name="dsv4-teacher-model",
-        served_model_name="deepseek-v4-flash",
-    )
+teacher_model = HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash")
+teacher_deployment = CustomDeployment.launch(
+    teacher_model,
+    recipe=SglangRecipe(
+        gpu="B200",
+        tp=4,
+        dp=4,
+        context_length=16384,
+        mem_fraction_static=0.85,
+        chunked_prefill_size=4096,
+        max_running_requests=64,
+        sglang_image="lmsysorg/sglang:v0.5.12.post1-cu130",
+        install_transformers_from_git=False,
+        env_vars={
+            "NCCL_CUMEM_ENABLE": "1",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_NUM_MAX_TOKENS_PER_RANK": "8320",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_FP4_ACTS": "1",
+            "SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_MXF4_KIND": "1",
+        },
+        extra_server_args={
+            "--trust-remote-code": "",
+            "--moe-a2a-backend": "megamoe",
+            "--enable-breakable-cuda-graph": "",
+            "--enable-mixed-chunk": "",
+            "--piecewise-cuda-graph-max-tokens": "4096",
+            "--tool-call-parser": "deepseekv4",
+            "--reasoning-parser": "deepseek-v4",
+        },
+        startup_timeout=TEACHER_READY_TIMEOUT,
+    ),
+    app_name="dsv4-teacher-model",
+    served_model_name="deepseek-v4-flash",
+)
 
-    base_student_deployment.wait_until_ready(timeout=STUDENT_READY_TIMEOUT)
-    print(f"student base model deployed to {base_student_deployment.url}")
+base_student_deployment.wait_until_ready(timeout=STUDENT_READY_TIMEOUT)
+print(f"student base model deployed to {base_student_deployment.url}")
 
-    teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
-    print(f"teacher model deployed to {teacher_deployment.url}")
+teacher_deployment.wait_until_ready(timeout=TEACHER_READY_TIMEOUT)
+print(f"teacher model deployed to {teacher_deployment.url}")
 
-    TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
-
+TEACHER_GENERATE_URL = f"{teacher_deployment.url}/generate"
 TEACHER_RM_CONCURRENCY = 24
 
 STUDENT_ENABLE_THINKING = False
@@ -288,6 +286,13 @@ EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
 MAX_CONSECUTIVE_TOOL_ERRORS = 3
 
 
+@cache
+def _tokenizer(name: str):
+    from transformers import AutoTokenizer
+
+    return AutoTokenizer.from_pretrained(name, trust_remote_code=True)
+
+
 def _chat(
     deployment,
     messages,
@@ -421,38 +426,37 @@ def _print_eval_summary(mean: float, rows: list[dict], *, prefix: str = "") -> N
         print(f"{label}first-call tool match: {_frac(rows, 'tool_match'):.1%}")
 
 
-if __name__ == "__main__":
-    teacher_mean = None
-    teacher_rows = None
-    print("running teacher base model evaluation...")
-    try:
-        teacher_mean, teacher_rows = run_eval(
-            teacher_deployment,
-            ready_timeout=TEACHER_READY_TIMEOUT,
-            max_concurrency=4,
-        )
-        _print_eval_summary(teacher_mean, teacher_rows)
-    except Exception as e:
-        print(
-            f"[teacher-eval] FAILED ({e!r}) — continuing with student baseline",
-            flush=True,
-        )
+teacher_mean = None
+teacher_rows = None
+print("running teacher base model evaluation...")
+try:
+    teacher_mean, teacher_rows = run_eval(
+        teacher_deployment,
+        ready_timeout=TEACHER_READY_TIMEOUT,
+        max_concurrency=4,
+    )
+    _print_eval_summary(teacher_mean, teacher_rows)
+except Exception as e:
+    print(
+        f"[teacher-eval] FAILED ({e!r}) — continuing with student baseline",
+        flush=True,
+    )
 
-    print("running student base model evaluation...")
-    try:
-        base_mean, base_rows = run_eval(
-            base_student_deployment,
-            ready_timeout=STUDENT_READY_TIMEOUT,
-            max_concurrency=4,
-        )
-        _print_eval_summary(base_mean, base_rows)
-    except Exception as e:
-        print(
-            f"[base-eval] FAILED ({e!r}) — skipping baseline, proceeding to training",
-            flush=True,
-        )
-        base_mean = None
-        base_rows = None
+print("running student base model evaluation...")
+try:
+    base_mean, base_rows = run_eval(
+        base_student_deployment,
+        ready_timeout=STUDENT_READY_TIMEOUT,
+        max_concurrency=4,
+    )
+    _print_eval_summary(base_mean, base_rows)
+except Exception as e:
+    print(
+        f"[base-eval] FAILED ({e!r}) — skipping baseline, proceeding to training",
+        flush=True,
+    )
+    base_mean = None
+    base_rows = None
 
 # ## Creating a reward function
 #
@@ -909,104 +913,102 @@ def cross_tokenizer_post_process(args, samples, **kwargs):
 #
 # With all that in place, it's dead simple to kick off training.
 
-if __name__ == "__main__":
-    config = TrainConfig(
-        model=student_model,
-        dataset=dataset,
-        recipe=Qwen3_6_35B_Recipe(
-            colocate=False,
-            actor_num_nodes=2,
-            actor_num_gpus_per_node=8,
-            rollout_num_gpus=8,
-            rollout_num_gpus_per_engine=8,
-            tensor_model_parallel_size=2,
-            sequence_parallel=True,
-            context_parallel_size=2,
-            expert_model_parallel_size=4,
-            sglang_dp_size=8,
-            sglang_enable_dp_attention=True,
-            sglang_ep_size=8,
-            sglang_cuda_graph_bs=[1, 2, 4, 8, 16, 24, 32, 48],
-            sglang_max_running_requests=48,
-            num_rollout=5,
-            rollout_batch_size=16,
-            n_samples_per_prompt=8,
-            global_batch_size=16,
-            rollout_max_response_len=4000,
-            sglang_mem_fraction_static=0.75,
-            use_kl_loss=True,
-            kl_loss_coef=0.02,
-            no_save_optim=True,
-            custom_rm_function=cross_tokenizer_reward,
-            custom_generate_function=tool_step_generate,
-            custom_reward_post_process_function=cross_tokenizer_post_process,
-            rollout_function=curriculum_rollout,
-            image_overlay=lambda img: img.pip_install(
-                "modal~=1.5.5",
-                "huggingface_hub~=1.12.0",
-                "aiohttp~=3.13.0",
-                "jsonschema~=4.23.0",
-                "bfcl-eval==2026.3.23",
-            ).add_local_file(
-                str(Path(__file__).with_name("env.py")),
-                remote_path="/root/env.py",
-                copy=True,
-            ),
-            environment={
-                "PYTHONPATH": "/root/Megatron-LM/:/root",
-                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-                "NCCL_NVLS_ENABLE": "1",
-                "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-            },
-            extra_config={
-                "use_opd": True,
-                "opd_type": "sglang",
-                "opd_kl_coef": 0.3,
-                "rm_url": TEACHER_GENERATE_URL,
-                "teacher_rm_concurrency": TEACHER_RM_CONCURRENCY,
-                "max_turns": MAX_TURNS,
-            },
+config = TrainConfig(
+    model=student_model,
+    dataset=dataset,
+    recipe=Qwen3_6_35B_Recipe(
+        colocate=False,
+        actor_num_nodes=2,
+        actor_num_gpus_per_node=8,
+        rollout_num_gpus=8,
+        rollout_num_gpus_per_engine=8,
+        tensor_model_parallel_size=2,
+        sequence_parallel=True,
+        context_parallel_size=2,
+        expert_model_parallel_size=4,
+        sglang_dp_size=8,
+        sglang_enable_dp_attention=True,
+        sglang_ep_size=8,
+        sglang_cuda_graph_bs=[1, 2, 4, 8, 16, 24, 32, 48],
+        sglang_max_running_requests=48,
+        num_rollout=5,
+        rollout_batch_size=16,
+        n_samples_per_prompt=8,
+        global_batch_size=16,
+        rollout_max_response_len=4000,
+        sglang_mem_fraction_static=0.75,
+        use_kl_loss=True,
+        kl_loss_coef=0.02,
+        no_save_optim=True,
+        custom_rm_function=cross_tokenizer_reward,
+        custom_generate_function=tool_step_generate,
+        custom_reward_post_process_function=cross_tokenizer_post_process,
+        rollout_function=curriculum_rollout,
+        image_overlay=lambda img: img.pip_install(
+            "modal~=1.5.5",
+            "huggingface_hub~=1.12.0",
+            "aiohttp~=3.13.0",
+            "jsonschema~=4.23.0",
+            "bfcl-eval==2026.3.23",
+        ).add_local_file(
+            str(Path(__file__).with_name("env.py")),
+            remote_path="/root/env.py",
+            copy=True,
         ),
-    )
+        environment={
+            "PYTHONPATH": "/root/Megatron-LM/:/root",
+            "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+            "NCCL_NVLS_ENABLE": "1",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+        },
+        extra_config={
+            "use_opd": True,
+            "opd_type": "sglang",
+            "opd_kl_coef": 0.3,
+            "rm_url": TEACHER_GENERATE_URL,
+            "teacher_rm_concurrency": TEACHER_RM_CONCURRENCY,
+            "max_turns": MAX_TURNS,
+        },
+    ),
+)
 
 # ## Evaluate the trained student
 #
 # We'll deploy our trained student and compare it
 # to our baseline evaluation from earlier.
 
-if __name__ == "__main__":
-    with config.launch() as run:
-        print(f"run id: {run.training_run_id}")
-        checkpoint = None
-        while True:
-            done = run.done()
-            latest = run.latest_checkpoint()
-            if latest is not None and latest != checkpoint:
-                checkpoint = latest
-                print(f"new checkpoint: {checkpoint.path}")
-            if done:
-                break
-            time.sleep(30)
-        print(f"checkpoint: {checkpoint.path}")
+with config.launch() as run:
+    print(f"run id: {run.training_run_id}")
+    checkpoint = None
+    while True:
+        done = run.done()
+        latest = run.latest_checkpoint()
+        if latest is not None and latest != checkpoint:
+            checkpoint = latest
+            print(f"new checkpoint: {checkpoint.path}")
+        if done:
+            break
+        time.sleep(30)
+    print(f"checkpoint: {checkpoint.path}")
 
-    trained_deployment = Endpoint.launch(
-        student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
-    )
-    print(f"checkpoint deployed to {trained_deployment.url}")
+trained_deployment = Endpoint.launch(
+    student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
+)
+print(f"checkpoint deployed to {trained_deployment.url}")
 
-    print("running student checkpoint evaluation...")
-    trained_mean, trained_rows = run_eval(
-        trained_deployment,
-        ready_timeout=STUDENT_READY_TIMEOUT,
-        max_concurrency=4,
-    )
-    _print_eval_summary(trained_mean, trained_rows)
+print("running student checkpoint evaluation...")
+trained_mean, trained_rows = run_eval(
+    trained_deployment,
+    ready_timeout=STUDENT_READY_TIMEOUT,
+    max_concurrency=4,
+)
+_print_eval_summary(trained_mean, trained_rows)
 
-    if base_rows is None:
-        print("(baseline eval was skipped — trained metrics only)")
-        raise SystemExit
+if base_rows is None:
+    print("(baseline eval was skipped — trained metrics only)")
+    raise SystemExit
 
-    _print_eval_summary(base_mean, base_rows, prefix="base")
+_print_eval_summary(base_mean, base_rows, prefix="base")
 
 # ## Results
 #
