@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import runpy
@@ -480,8 +481,12 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    if not args.prepare_only and args.limit is not None and args.limit < 300:
-        parser.error("--limit must be at least 300 unless --prepare-only is set")
+    min_limit = math.ceil(300 / (1 - EVAL_SPLIT_FRACTION))
+    if not args.prepare_only and args.limit is not None and args.limit < min_limit:
+        parser.error(
+            f"--limit must be at least {min_limit} to allow for the eval split "
+            "unless --prepare-only is set"
+        )
 
     dataset_root = args.dataset_root
     if (
