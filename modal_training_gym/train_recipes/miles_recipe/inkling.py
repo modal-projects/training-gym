@@ -183,8 +183,6 @@ class Inkling_Small_Recipe(_InklingSmallRecipe):
     # One engine spans 2 nodes.
     rollout_num_gpus_per_engine: int = 16
 
-    sglang_context_length: int = 4096
-
     # Dynamic token packing exposes a PP-p2p x EP-all-to-all NCCL launch-order race
     # on varlen shapes, so upstream pins a fixed micro-batch for full-parameter runs.
     # This overrides MilesRecipe's use_dynamic_batch_size=True default.
