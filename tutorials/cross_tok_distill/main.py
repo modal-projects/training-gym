@@ -22,13 +22,13 @@ import json
 import re
 import sys
 import time
-from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from env import (
     BfclMultiTurnConfig,
     BfclMultiTurnDataset,
+    _tokenizer,
     build_env,
     build_prefix_messages,
     prefix_turn_index,
@@ -286,13 +286,6 @@ CONTEXT_SAFETY_MARGIN = 512
 EVAL_TAIL_STEPS = CURRICULUM_TAIL_MIN
 EVAL_MAX_TURNS = EVAL_TAIL_STEPS * 2
 MAX_CONSECUTIVE_TOOL_ERRORS = 3
-
-
-@cache
-def _tokenizer(name: str):
-    from transformers import AutoTokenizer
-
-    return AutoTokenizer.from_pretrained(name, trust_remote_code=True)
 
 
 def _chat(
