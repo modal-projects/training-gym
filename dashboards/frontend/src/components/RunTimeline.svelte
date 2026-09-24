@@ -19,6 +19,7 @@
     shouldShowOpenRolloutAction,
   } from "../lib/timing.js";
   import { fmtDate } from "../lib/format.js";
+  import ChartZoomButtons from "./ChartZoomButtons.svelte";
   import TimeAxis from "./TimeAxis.svelte";
 
   let {
@@ -33,8 +34,8 @@
     attemptMarkers = [],
     // Wall-clock window `{ start, end }` (epoch seconds) to show; null shows
     // the whole timeline. With `onChangeTimeRange` the window is controlled
-    // by the parent and every brush/wheel gesture is reported back through it;
-    // without it the timeline keeps its own.
+    // by the parent and every brush / zoom-button change is reported back
+    // through it; without it the timeline keeps its own.
     timeRange = null,
     onChangeTimeRange = null,
   } = $props();
@@ -175,8 +176,8 @@
     return (baseTimeline.mapOffset(t - baseTimeline.runStart) - w0) / (w1 - w0);
   }
 
-  // Brush/wheel output arrives as fractions of the viewport; walk them back
-  // through the visible window and the gap compression to wall-clock seconds.
+  // Brush output arrives as fractions of the viewport; walk them back through
+  // the visible window and the gap compression to wall-clock seconds.
   function handleBrush([f0, f1]) {
     const span = baseTimeline.span;
     if (!span || baseTimeline.runStart == null || outOfRange) return;
@@ -458,6 +459,11 @@
         {/each}
       </div>
       <div class="controls">
+        <ChartZoomButtons
+          onChangeDomainX={handleBrush}
+          canZoomIn={!outOfRange && zoom < MAX_ZOOM}
+          canZoomOut={zoomed}
+        />
         {#if !controlled && zoomed}
           <button
             class="dl-btn"
