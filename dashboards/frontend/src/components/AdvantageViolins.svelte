@@ -14,7 +14,7 @@
   // it over each bucket to get that bucket's mass. Bar lengths are normalised
   // across all buckets of all violins so widths are comparable between steps.
 
-  import { brushZoom } from "../lib/brushZoom.js";
+  import { brushZoom, fractionsToDomain } from "../lib/brushZoom.js";
   import ChartZoomButtons from "./ChartZoomButtons.svelte";
   import TimeAxis from "./TimeAxis.svelte";
 
@@ -163,6 +163,11 @@
   // with the mean step spacing so zooming out past the data keeps working.
   function handleBrush([f0, f1]) {
     if (!zoomable) return;
+    // Expand the current domain even when it contains just one sparse rollout.
+    if (hasDomain && f1 - f0 > 1) {
+      onChangeDomainX(fractionsToDomain([f0, f1], xDomain));
+      return;
+    }
     const xs = pts.map((p) => p.x);
     const n = xs.length;
     let toX;

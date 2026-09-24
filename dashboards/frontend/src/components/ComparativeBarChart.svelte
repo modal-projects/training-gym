@@ -80,16 +80,13 @@
     // than half of it is covered.
     let newLo = Math.round(lo + f0 * count);
     let newHi = Math.round(lo + f1 * count) - 1;
-    if (newLo === lo && newHi === hi) {
-      // A step too small to move a whole column still has to do something,
-      // or zooming a narrow window would feel dead.
-      if (f1 - f0 > 1) {
-        newLo = lo - 1;
-        newHi = hi + 1;
-      } else if (f1 - f0 < 1 && count > 1) {
-        if (f0 > 1 - f1) newLo = lo + 1;
-        else newHi = hi - 1;
-      }
+    if (f1 - f0 > 1) {
+      // Expand on both sides so clamping at an edge cannot undo the step.
+      newLo = Math.min(newLo, lo - 1);
+      newHi = Math.max(newHi, hi + 1);
+    } else if (newLo === lo && newHi === hi && f1 - f0 < 1 && count > 1) {
+      if (f0 > 1 - f1) newLo = lo + 1;
+      else newHi = hi - 1;
     }
     setZoom(newLo, newHi);
   }
