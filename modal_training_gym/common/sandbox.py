@@ -43,12 +43,15 @@ class Sandbox:
         sb = self._sb
         if sb is None:
             return
+        self._sb = None
         try:
             sb.terminate()
         except Exception:
-            logger.exception("Sandbox.terminate failed")
+            logger.exception(
+                "Sandbox %s failed to terminate; it runs until its timeout",
+                sb.object_id,
+            )
         sb.detach()
-        self._sb = None
 
     def write(self, path: str, data: str | bytes) -> None:
         if isinstance(data, str):
