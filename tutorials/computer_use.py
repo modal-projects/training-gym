@@ -239,19 +239,26 @@ def run_eval(deployment, *, max_concurrency: int = 2) -> tuple[float, list[dict]
 
 
 model = Qwen3_VL_8B()
-base_deployment = CustomDeployment.launch(
-    model,
-    unauthenticated=True,
-)
-print(f"Base model URL: {base_deployment.url}")
 
-print("--- Evaluating base model... ---")
-base_mean, base_rows = run_eval(base_deployment)
-n_hits = sum(1 for r in base_rows if r.get("inside_box"))
-print(
-    f"Base accuracy (clicks inside element): "
-    f"{n_hits}/{len(base_rows)} ({base_mean:.1%})"
-)
+
+def deploy_base_model():
+    base_deployment = CustomDeployment.launch(
+        model,
+        unauthenticated=True,
+    )
+    print(f"Base model URL: {base_deployment.url}")
+    return base_deployment
+
+
+def run_baseline_evals(deployment):
+    print("--- Evaluating base model... ---")
+    base_mean, base_rows = run_eval(deployment)
+    n_hits = sum(1 for r in base_rows if r.get("inside_box"))
+    print(
+        f"Base accuracy (clicks inside element): "
+        f"{n_hits}/{len(base_rows)} ({base_mean:.1%})"
+    )
+
 
 # ## Training
 #
@@ -298,48 +305,57 @@ config = TrainConfig(
         metrics=WandbConfig(project="computer-use-grounding"),
     ),
 )
+
+
+def train(config):
+    with config.launch() as run:
+        print(f"run id: {run.training_run_id}")
+        checkpoint = None
+        while True:
+            done = run.done()
+            latest = run.latest_checkpoint()
+            if latest is not None and latest != checkpoint:
+                checkpoint = latest
+                print(f"new checkpoint: {checkpoint.path}")
+            if done:
+                break
+            time.sleep(30)
+        if checkpoint is None:
+            raise RuntimeError("run produced no checkpoint")
+        print(f"Checkpoint: {checkpoint.path}")
+    return checkpoint
+
+
 # ## Evaluate the trained model
 #
-# Let's run the same eval on the trained checkpoint and compare accuracy.
+# Let's run the same eval on the trained checkpoint.
 
-with config.launch() as run:
-    print(f"run id: {run.training_run_id}")
-    checkpoint = None
-    while True:
-        done = run.done()
-        latest = run.latest_checkpoint()
-        if latest is not None and latest != checkpoint:
-            checkpoint = latest
-            print(f"new checkpoint: {checkpoint.path}")
-        if done:
-            break
-        time.sleep(30)
-    print(f"Checkpoint: {checkpoint.path}")
 
-trained_deployment = CustomDeployment.launch(
-    model,
-    checkpoint=checkpoint,
-    app_name="qwen3-vl-8b-grounding-serve",
-    served_model_name="qwen3-vl-8b-grounding",
-    unauthenticated=True,
-)
-print(f"Trained model URL: {trained_deployment.url}")
+def deploy_trained_model(checkpoint):
+    trained_deployment = CustomDeployment.launch(
+        model,
+        checkpoint=checkpoint,
+        app_name="qwen3-vl-8b-grounding-serve",
+        served_model_name="qwen3-vl-8b-grounding",
+        unauthenticated=True,
+    )
+    print(f"Trained model URL: {trained_deployment.url}")
+    return trained_deployment
 
-print("--- Evaluating trained model... ---")
-trained_mean, trained_rows = run_eval(trained_deployment)
-n_hits = sum(1 for r in trained_rows if r.get("inside_box"))
-print(
-    f"Trained accuracy (clicks inside element): "
-    f"{n_hits}/{len(trained_rows)} ({trained_mean:.1%})"
-)
 
-# ## Results
-#
-# Let's compare base vs trained accuracy.
+def run_trained_evals(trained_deployment):
+    print("--- Evaluating trained model... ---")
+    trained_mean, trained_rows = run_eval(trained_deployment)
+    n_hits = sum(1 for r in trained_rows if r.get("inside_box"))
+    print(
+        f"Trained accuracy (clicks inside element): "
+        f"{n_hits}/{len(trained_rows)} ({trained_mean:.1%})"
+    )
 
-base_hits = sum(1 for r in base_rows if r.get("inside_box"))
-trained_hits = sum(1 for r in trained_rows if r.get("inside_box"))
-total = len(base_rows)
-print(f"Base model:    {base_hits}/{total} ({base_mean:.1%})")
-print(f"Trained model: {trained_hits}/{total} ({trained_mean:.1%})")
-print(f"Delta:         {trained_mean - base_mean:+.1%}")
+
+if __name__ == "__main__":
+    base_deployment = deploy_base_model()
+    run_baseline_evals(base_deployment)
+    checkpoint = train(config)
+    trained_deployment = deploy_trained_model(checkpoint)
+    run_trained_evals(trained_deployment)

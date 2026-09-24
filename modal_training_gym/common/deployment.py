@@ -463,7 +463,7 @@ class CustomDeployment(BaseModel):
         t.start()
         return t
 
-    def wait_until_ready(self, timeout: int = 600) -> None:
+    def wait_until_ready(self, timeout: int = 15 * 60) -> None:
         """Wait until the deployment can serve traffic.
 
         Args:
@@ -493,7 +493,7 @@ class CustomDeployment(BaseModel):
         # "crashlooping". Only flag a crashloop quickly once we've actually seen a
         # container come up and then disappear (a real restart cycle).
         recipe = self.recipe
-        startup_timeout = recipe.startup_timeout if recipe is not None else 20 * 60
+        startup_timeout = recipe.startup_timeout if recipe is not None else timeout
         # Cap the cold-start grace at the overall deadline — otherwise it always
         # exceeds `timeout` and the loop hits TimeoutError before the crashloop
         # check can fire, so cold-start crashloop detection never engages.

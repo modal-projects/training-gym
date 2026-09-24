@@ -262,7 +262,7 @@ def monitor(model: str = "", num_steps: int = 1) -> dict:
         print(f"synmon: {QUICKSTART_NAME!r}")
         run: TrainingRun | None = None
         try:
-            run = runpy.run_module("scripts.quickstart")["run"]
+            run = runpy.run_module("scripts.quickstart", run_name="__main__")["run"]
             completed = run.result(timeout=PROBE_TIMEOUT_S)
             training_run = TrainingRun.from_id(completed.training_run_id)
             url = training_run.modal_app_url or _lookup_app_url(
