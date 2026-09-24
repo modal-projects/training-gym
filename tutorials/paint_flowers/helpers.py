@@ -13,8 +13,6 @@ from concurrent.futures import ThreadPoolExecutor
 import modal
 from PIL import Image
 
-from modal_training_gym import Sandbox
-
 
 _JS_FENCE = re.compile(r"```(?:javascript|js)\s*\n(.*?)```", re.DOTALL)
 _BANNED = re.compile(
@@ -156,7 +154,7 @@ if (typeof window.setup === "function") {
 """
 
 
-def render_image() -> modal.Image:
+def renderer_image() -> modal.Image:
     return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("chromium", "nodejs", "npm", "fonts-liberation")
@@ -166,35 +164,6 @@ def render_image() -> modal.Image:
             " p5@2.3.2 p5.brush@2.2.1 puppeteer-core@23.11.1",
         )
     )
-
-
-def render_in_sandbox(code: str) -> tuple[bytes | None, dict]:
-    try:
-        with Sandbox(
-            image=render_image(),
-            workdir="/render",
-            timeout=300,
-            cpu=1.0,
-            memory=2048,
-            block_network=True,
-            app_name="training-gym-flower-render",
-        ) as sandbox:
-            sandbox.write("/render/render.js", RENDER_JS)
-            sandbox.write("/render/sketch.js", code)
-            result = sandbox.run(
-                "node", "/render/render.js", "/render/sketch.js", timeout=180
-            )
-        out, err = result.stdout, result.stderr
-        if "PNGB64:" in out:
-            png = base64.b64decode(out.split("PNGB64:", 1)[1].strip())
-            return png, {"render": "ok"}
-        kind = "fail" if "SKETCH_ERROR:" in err else "unavailable"
-        return None, {"render": kind, "stderr": err[-400:]}
-    except Exception as e:
-        return None, {
-            "render": "unavailable",
-            "stderr": f"{type(e).__name__}: {e}"[-400:],
-        }
 
 
 REMOTE_ASSETS_DIR = "/root/flower_assets"
@@ -369,7 +338,7 @@ def judge_pair(candidate: bytes, reference: bytes, flip: bool, judge):
     a, b = (reference, candidate) if flip else (candidate, reference)
     try:
         with _LOCKS.setdefault("judge", threading.Lock()):
-            judge.wait_until_ready(timeout=15 * 60)
+            judge.wait_until_ready()
         msg = judge.chat(
             [
                 {

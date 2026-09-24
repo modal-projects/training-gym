@@ -356,7 +356,7 @@ class EvalConfig:
         deployment: "CustomDeployment",
         debug: bool = False,
         max_concurrency: int = 1,
-        ready_timeout: int = 3000,
+        ready_timeout: int = 15 * 60,
     ) -> EvalResult:
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
 
@@ -389,11 +389,6 @@ class EvalConfig:
         result.save()
 
         try:
-            # Large MoE checkpoints (e.g. Qwen3.6-35B-A3B) can take tens of
-            # minutes to load weights off the HF cache volume, well past the
-            # old 600s default. ``wait_until_ready`` still fails fast on a
-            # crashlooping deploy, so a generous timeout only extends waiting
-            # for genuinely slow loads, not broken deploys.
             deployment.wait_until_ready(timeout=ready_timeout)
         except Exception:
             result.status = "failed"

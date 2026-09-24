@@ -33,5 +33,7 @@ config = TrainConfig(
         custom_rm_function=gsm8k_rm,
     ),
 )
-run = config.launch()
-print(run.training_run_id)
+
+if __name__ == "__main__":
+    run = config.launch()
+    print(run.training_run_id)
