@@ -1739,6 +1739,16 @@ dialog {
     width: 104px;
     padding-inline: 12px;
   }
+
+  .tg-page-head {
+    flex-direction: column;
+  }
+
+  .tg-page-head__actions {
+    order: -1;
+    justify-content: flex-start;
+    margin-inline-start: 0;
+  }
 }
 
 @media (max-width: 42rem) {
