@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from modal_training_gym.common.dataset import DatasetConfig
+from modal_training_gym.common.dataset import DatasetConfig, MultimodalDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.models.base import ModelConfig
 
@@ -13,6 +13,12 @@ _ALLOWED_MODALITIES = frozenset({"image", "audio", "video"})
 
 
 def requested_modalities(dataset: DatasetConfig) -> frozenset[str]:
+    if getattr(dataset, "multimodal_keys", None):
+        raise TrainingGymConfigError(
+            "multimodal_keys is not supported; use MultimodalDataset(modality=..., media_column=...)."
+        )
+    if not isinstance(dataset, MultimodalDataset):
+        return frozenset()
     requested = frozenset(dataset.modalities)
     unknown = sorted(name for name in requested if name not in _ALLOWED_MODALITIES)
     if unknown:
@@ -26,9 +32,7 @@ def multimodal_key_map(dataset: DatasetConfig) -> dict[str, str] | None:
     requested = requested_modalities(dataset)
     if not requested:
         return None
-    if not dataset.media_column:
-        raise TrainingGymConfigError("media_column is required when modalities is set")
-    return {name: dataset.media_column for name in requested}
+    return {name: cast(MultimodalDataset, dataset).media_column for name in requested}
 
 
 def validate_modalities(

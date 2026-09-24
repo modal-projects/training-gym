@@ -27,6 +27,7 @@ from modal_training_gym.common import hf_secrets, proxy_auth_secrets
 
 
 from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
@@ -387,10 +388,7 @@ def build_slime_app(
                 f"use_dynamic_batch_size={slime.use_dynamic_batch_size}."
             )
 
-    megatron_to_hf_mode = (
-        slime.overrides(dataset, model).get("megatron_to_hf_mode")
-        or slime.megatron_to_hf_mode
-    )
+    megatron_to_hf_mode = slime.megatron_to_hf_mode
     conversion_ref_load = _conversion_ref_load(slime, model)
 
     # ── GDN compatibility ─────────────────────────────────────────────────
@@ -447,6 +445,12 @@ def build_slime_app(
         and dataset is not None
         and "image" in requested_modalities(dataset)
     ):
+        if slime.local_slime or _needs_git_overlay:
+            raise TrainingGymConfigError(
+                "Qwen3.5 image training installs a VL plugin that overwrites "
+                "hf_to_megatron and cannot be combined with local_slime or "
+                "slime_git_repository/slime_git_revision overlays."
+            )
         image = _with_qwen35_vl_plugin(image)
 
     if slime.image_run_commands:
@@ -494,10 +498,6 @@ def build_slime_app(
             f"echo {_PATCH_TORCH_LOAD_B64} | base64 -d | python3",
             f"echo {_PATCH_GLOBAL_PLAN_B64} | base64 -d | python3",
             f"echo {_PATCH_CHECKPOINT_SAVE_B64} | base64 -d | python3",
-        )
-    else:
-        train_image = image.run_commands(
-            f"echo {_PATCH_TORCH_LOAD_B64} | base64 -d | python3",
         )
     train_image = train_image.run_commands(
         f"echo {_PATCH_CHECKPOINT_COMMIT_B64} | base64 -d | python3"
@@ -861,7 +861,12 @@ def build_slime_app(
             await run_record.save(is_async=True)
 
             with shared.resumed_recipe(slime, save_root, resume_checkpoint):
-                if megatron_to_hf_mode == "bridge" and _hf_ref:
+                if (
+                    resume_checkpoint is None
+                    and megatron_to_hf_mode == "bridge"
+                    and not slime.ref_load
+                    and _hf_ref
+                ):
                     object.__setattr__(slime, "ref_load", _hf_ref)
                 elif megatron_to_hf_mode != "bridge" and not slime.ref_load:
                     object.__setattr__(slime, "ref_load", conversion_ref_load)

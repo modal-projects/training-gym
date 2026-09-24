@@ -108,8 +108,6 @@ class DatasetConfig(ABC):
     """Dataset fields and on-disk serialization shared across training frameworks."""
 
     _type: DatasetType = DatasetType.DEFAULT
-    modalities: frozenset[str] = frozenset()
-    media_column: str | None = None
 
     def cache_key(self) -> str | None:
         return None
@@ -153,8 +151,6 @@ class DatasetConfig(ABC):
             cols.add(self.input_key())
         if self.label_key():
             cols.add(self.label_key())
-        if self.media_column:
-            cols.add(self.media_column)
         return cols
 
     def validate_written(self, path: str) -> None:
@@ -713,6 +709,11 @@ class MultimodalDataset(DatasetConfig):
 
     def label_key(self) -> str:
         return "label"
+
+    def _expected_columns(self) -> set[str]:
+        cols = super()._expected_columns()
+        cols.add(self.media_column)
+        return cols
 
     def source_rows(self) -> Iterable[dict[str, Any]]:
         return self._source_rows

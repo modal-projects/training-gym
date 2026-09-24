@@ -681,9 +681,7 @@ class TrainConfig:
                                 is_active=is_active,
                             )
 
-                        megatron_to_hf_mode = self.recipe.overrides(
-                            self.dataset, self.model
-                        ).get("megatron_to_hf_mode") or getattr(
+                        megatron_to_hf_mode = getattr(
                             self.recipe, "megatron_to_hf_mode", ""
                         )
                         needs_conversion = megatron_to_hf_mode != "bridge"
