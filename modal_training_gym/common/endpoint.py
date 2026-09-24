@@ -162,7 +162,7 @@ class Endpoint:
         routing_region: str | None = None,
         environment: str | None = None,
         colocate_compute: bool = False,
-        wait_timeout_sec: float = 300,
+        wait_timeout_sec: float = 15 * 60,
         recreate_if_existing: bool = False,
     ) -> "Endpoint":
         """Deploy ``model`` without waiting for readiness.
@@ -256,7 +256,7 @@ class Endpoint:
                 )
         return headers
 
-    def wait_until_ready(self, timeout: float = 30 * 60) -> None:
+    def wait_until_ready(self, timeout: float = 15 * 60) -> None:
         """Wait until the endpoint can serve traffic.
 
         Args:

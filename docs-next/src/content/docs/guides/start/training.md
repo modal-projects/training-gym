@@ -54,7 +54,7 @@ Now, we could do offline evals:
 deployment = Endpoint.launch(
     model, checkpoint, unauthenticated=True, recreate_if_existing=True
 )
-deployment.wait_until_ready(timeout=15 * 60)
+deployment.wait_until_ready()
 print(f"trained model deployed to {deployment.url}")
 
 

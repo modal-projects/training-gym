@@ -389,11 +389,6 @@ class EvalConfig:
         result.save()
 
         try:
-            # Large MoE checkpoints (e.g. Qwen3.6-35B-A3B) can take tens of
-            # minutes to load weights off the HF cache volume, well past the
-            # old 600s default. ``wait_until_ready`` still fails fast on a
-            # crashlooping deploy, so a generous timeout only extends waiting
-            # for genuinely slow loads, not broken deploys.
             deployment.wait_until_ready(timeout=ready_timeout)
         except Exception:
             result.status = "failed"

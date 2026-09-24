@@ -98,17 +98,18 @@ for cfg in configs:
 #
 # Once it all looks good, `.launch()` it!
 
-launches = group.launch()
-print(f"group {group.group_id}: {len(launches)} runs launched")
-for launch in launches:
-    print(
-        f"- {launch.training_run_id}, app={launch.modal_app_id}, group_id={launch.group_id}"
-    )
-if group.failures:
-    for overrides, err in group.failures:
-        print(f"- FAILED {overrides}: {err}")
+if __name__ == "__main__":
+    launches = group.launch()
+    print(f"group {group.group_id}: {len(launches)} runs launched")
+    for launch in launches:
+        print(
+            f"- {launch.training_run_id}, app={launch.modal_app_id}, group_id={launch.group_id}"
+        )
+    if group.failures:
+        for overrides, err in group.failures:
+            print(f"- FAILED {overrides}: {err}")
 
-results = TrainingRun.wait_all(launches)
-print(f"group {group.group_id}: {len(results)} runs completed")
-for run in results:
-    print(f"completed {run.training_run_id} (group_id={run.group_id})")
+    results = TrainingRun.wait_all(launches)
+    print(f"group {group.group_id}: {len(results)} runs completed")
+    for run in results:
+        print(f"completed {run.training_run_id} (group_id={run.group_id})")

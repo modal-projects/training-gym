@@ -463,7 +463,7 @@ class CustomDeployment(BaseModel):
         t.start()
         return t
 
-    def wait_until_ready(self, timeout: int = 600) -> None:
+    def wait_until_ready(self, timeout: int = 15 * 60) -> None:
         """Wait until the deployment can serve traffic.
 
         Args:
