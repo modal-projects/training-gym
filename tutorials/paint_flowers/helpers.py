@@ -154,7 +154,7 @@ if (typeof window.setup === "function") {
 """
 
 
-def render_image() -> modal.Image:
+def renderer_image() -> modal.Image:
     return (
         modal.Image.debian_slim(python_version="3.12")
         .apt_install("chromium", "nodejs", "npm", "fonts-liberation")

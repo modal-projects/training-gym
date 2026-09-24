@@ -171,15 +171,15 @@ def deploy_judge():
         unauthenticated=True,
         recreate_if_existing=True,
     )
-    judge.wait_until_ready(timeout=30 * 60)
     helpers.launch_hpsv3()
+    judge.wait_until_ready(timeout=30 * 60)
     return judge
 
 
 def render_in_sandbox(code: str) -> tuple[bytes | None, dict]:
     try:
         with Sandbox(
-            image=helpers.render_image(),
+            image=helpers.renderer_image(),
             workdir="/render",
             timeout=300,
             cpu=1.0,

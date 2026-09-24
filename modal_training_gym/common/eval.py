@@ -356,7 +356,7 @@ class EvalConfig:
         deployment: "CustomDeployment",
         debug: bool = False,
         max_concurrency: int = 1,
-        ready_timeout: int = 3000,
+        ready_timeout: int = 15 * 60,
     ) -> EvalResult:
         from modal_training_gym.cli.setup import ensure_dashboard_deployed
 
