@@ -263,6 +263,7 @@
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           canZoomIn={rows.length > 1 || hasDomain}
+          canZoomOut={hasDomain}
         />
       {/if}
     </div>
