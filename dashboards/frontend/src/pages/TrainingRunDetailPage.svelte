@@ -1776,6 +1776,7 @@
                     series={distSeries(scoreDist)}
                     height={120}
                     showCategoryLabels={false}
+                    zoomable={false}
                     format={(v) => `${v}`}
                   />
                   <div class="dist-axis">
@@ -1819,6 +1820,7 @@
                       series={distSeries(advantageDist)}
                       height={120}
                       showCategoryLabels={false}
+                      zoomable={false}
                       format={(v) => `${v}`}
                     />
                     <div class="dist-axis">
