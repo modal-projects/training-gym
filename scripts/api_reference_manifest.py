@@ -34,6 +34,7 @@ def _group_for_module(module: str) -> str:
         "deploy_recipes" in module
         or module.endswith(".deployment")
         or module.endswith(".endpoint")
+        or module.endswith(".sandbox")
     ):
         return "deployment"
     return "training"

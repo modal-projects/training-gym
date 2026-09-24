@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 import modal
 from PIL import Image
 
+from modal_training_gym import Sandbox
+
 
 _JS_FENCE = re.compile(r"```(?:javascript|js)\s*\n(.*?)```", re.DOTALL)
 _BANNED = re.compile(
@@ -154,9 +156,6 @@ if (typeof window.setup === "function") {
 """
 
 
-RENDER_APP_NAME = "training-gym-flower-render"
-
-
 def render_image() -> modal.Image:
     return (
         modal.Image.debian_slim(python_version="3.12")
@@ -170,30 +169,25 @@ def render_image() -> modal.Image:
 
 
 def render_in_sandbox(code: str) -> tuple[bytes | None, dict]:
-    app = modal.App.lookup(RENDER_APP_NAME, create_if_missing=True)
-    sandbox = modal.Sandbox.create(
-        "sleep",
-        "infinity",
-        app=app,
-        image=render_image(),
-        workdir="/render",
-        timeout=300,
-        cpu=1.0,
-        memory=2048,
-        block_network=True,
-    )
     try:
-        sandbox.filesystem.write_text(RENDER_JS, "/render/render.js")
-        sandbox.filesystem.write_text(code, "/render/sketch.js")
-        proc = sandbox.exec(
-            "node", "/render/render.js", "/render/sketch.js", timeout=180
-        )
-        proc.wait()
-        out, err = proc.stdout.read(), proc.stderr.read()
+        with Sandbox(
+            image=render_image(),
+            workdir="/render",
+            timeout=300,
+            cpu=1.0,
+            memory=2048,
+            block_network=True,
+            app_name="training-gym-flower-render",
+        ) as sandbox:
+            sandbox.write("/render/render.js", RENDER_JS)
+            sandbox.write("/render/sketch.js", code)
+            result = sandbox.run(
+                "node", "/render/render.js", "/render/sketch.js", timeout=180
+            )
+        out, err = result.stdout, result.stderr
         if "PNGB64:" in out:
             png = base64.b64decode(out.split("PNGB64:", 1)[1].strip())
             return png, {"render": "ok"}
-        err = err or ""
         kind = "fail" if "SKETCH_ERROR:" in err else "unavailable"
         return None, {"render": kind, "stderr": err[-400:]}
     except Exception as e:
@@ -201,9 +195,6 @@ def render_in_sandbox(code: str) -> tuple[bytes | None, dict]:
             "render": "unavailable",
             "stderr": f"{type(e).__name__}: {e}"[-400:],
         }
-    finally:
-        sandbox.terminate()
-        sandbox.detach()
 
 
 REMOTE_ASSETS_DIR = "/root/flower_assets"
