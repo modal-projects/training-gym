@@ -15,6 +15,7 @@ from .errors import CLIError
 
 SKILLS_DIRECTORY = Path(".agents") / "skills"
 CLAUDE_SKILLS_DIRECTORY = Path(".claude") / "skills"
+RENAMED_SKILLS = {"training-gym-overview": "modal-dojo-overview"}
 
 
 def _bundled_skills_path() -> Path:
@@ -219,6 +220,29 @@ def _ensure_claude_compatibility(
     click.echo(f"Linked Claude skill at {link}")
 
 
+def _remove_renamed_skills(project_root: Path, installed: set[str]) -> None:
+    """Delete skill directories left behind under a previous skill name."""
+    for old_name, new_name in RENAMED_SKILLS.items():
+        if new_name not in installed:
+            continue
+        claude_link = project_root / CLAUDE_SKILLS_DIRECTORY / old_name
+        if _symlinked_claude_link_parent(project_root) is None and (
+            claude_link.is_symlink() or claude_link.exists()
+        ):
+            _remove_path(claude_link)
+        canonical = project_root / SKILLS_DIRECTORY / old_name
+        if canonical.is_symlink() or canonical.exists():
+            _remove_path(canonical)
+            click.echo(f"Removed {old_name} (renamed to {new_name})")
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    else:
+        shutil.rmtree(path)
+
+
 def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]:
     """Install every bundled skill and return their destinations."""
     project_root = (
@@ -261,6 +285,9 @@ def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]
             skill_name=skill_name,
             force=force,
         )
+    _remove_renamed_skills(
+        project_root, {skill_name for skill_name, _ in installed_destinations}
+    )
     return tuple(destination for _, destination in installed_destinations)
 
 

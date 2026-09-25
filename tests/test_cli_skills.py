@@ -329,6 +329,27 @@ def test_skills_install_accepts_explicit_non_git_project(tmp_path):
         assert claude_link.resolve() == destination
 
 
+def test_skills_install_removes_renamed_training_gym_overview(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    old_canonical = tmp_path / ".agents" / "skills" / "training-gym-overview"
+    old_canonical.mkdir(parents=True)
+    (old_canonical / "SKILL.md").write_text("---\nname: training-gym-overview\n---\n")
+    old_link = tmp_path / ".claude" / "skills" / "training-gym-overview"
+    old_link.parent.mkdir(parents=True)
+    old_link.symlink_to(old_canonical, target_is_directory=True)
+
+    result = CliRunner().invoke(cli_module.entrypoint_cli, ["skills", "install"])
+
+    assert result.exit_code == 0
+    assert "Removed training-gym-overview" in result.stdout
+    assert not old_canonical.exists()
+    assert not old_link.is_symlink() and not old_link.exists()
+    assert (
+        tmp_path / ".agents" / "skills" / "modal-dojo-overview" / "SKILL.md"
+    ).is_file()
+
+
 def test_skills_install_requires_git_repo_without_project_dir(monkeypatch, tmp_path):
     original_exists = Path.exists
     monkeypatch.setattr(
