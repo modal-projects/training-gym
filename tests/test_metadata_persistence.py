@@ -18,6 +18,7 @@ from contextlib import nullcontext
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from modal.exception import ExecutionError
 
 from modal_training_gym.common import run as run_mod
 from modal_training_gym.common.framework import Framework
@@ -312,3 +313,39 @@ def test_sync_list_reads_files_concurrently(fake_volume, monkeypatch):
     records = metadata.vol_list(MetadataStore.TRAINING_RUNS)
 
     assert sorted(r["training_run_id"] for r in records) == ["run-0", "run-1"]
+
+
+def test_compaction_writes_readable_records_before_raising(fake_volume, monkeypatch):
+    metadata.vol_put_summary_items(
+        MetadataStore.TRAINING_RUNS_SUMMARY,
+        [{"training_run_id": f"run-{i}", "status": "running"} for i in range(3)],
+    )
+    for i in range(3):
+        metadata.vol_put(
+            MetadataStore.TRAINING_RUNS,
+            f"run-{i}",
+            {"training_run_id": f"run-{i}", "status": "completed"},
+        )
+    unreadable = f"{metadata._store_path(MetadataStore.TRAINING_RUNS)}/run-1.json"
+    read_file = fake_volume.read_file
+
+    def read_or_fail(path: str):
+        if path == unreadable:
+            raise ExecutionError("block not found")
+        return read_file(path)
+
+    monkeypatch.setattr(fake_volume, "read_file", read_or_fail)
+
+    with pytest.raises(ExecutionError):
+        metadata.vol_compact_summary_items(
+            MetadataStore.TRAINING_RUNS_SUMMARY,
+            MetadataStore.TRAINING_RUNS,
+            item_id_key="training_run_id",
+        )
+
+    items = metadata.vol_get_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY)
+    assert {item["training_run_id"]: item["status"] for item in items} == {
+        "run-0": "completed",
+        "run-1": "running",
+        "run-2": "completed",
+    }

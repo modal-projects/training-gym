@@ -493,15 +493,17 @@ def _read_metadata_records(
                 [lambda entry=entry: _read(entry["path"]) for entry in entries]
             )
             records: list[dict[str, Any]] = []
+            failure: BaseException | None = None
             for entry, result in zip(entries, results, strict=True):
                 if result is None:
                     continue
                 if isinstance(result, BaseException):
-                    return records, result
+                    failure = failure or result
+                    continue
                 if not isinstance(result, dict):
                     continue
                 records.append(result)
-            return records, None
+            return records, failure
 
         return _run()
 
@@ -509,9 +511,12 @@ def _read_metadata_records(
         for attempt in range(_LIST_ATTEMPTS):
             try:
                 return json.loads(b"".join(vol.read_file(path)))
-            except (FileNotFoundError, NotFoundError):
-                return None
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (
+                FileNotFoundError,
+                NotFoundError,
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+            ):
                 return None
             except Error as exc:
                 if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
@@ -519,17 +524,19 @@ def _read_metadata_records(
                 time.sleep(2**attempt)
 
     records: list[dict[str, Any]] = []
+    failure: BaseException | None = None
     with ThreadPoolExecutor(max_workers=_READ_CONCURRENCY) as pool:
         results = list(pool.map(_read_sync, [entry["path"] for entry in entries]))
     for result in results:
         if result is None:
             continue
         if isinstance(result, BaseException):
-            return records, result
+            failure = failure or result
+            continue
         if not isinstance(result, dict):
             continue
         records.append(result)
-    return records, None
+    return records, failure
 
 
 @overload
@@ -817,8 +824,6 @@ def vol_compact_summary_items(
         vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
     )
     canonical_items, failure = _vol_list_core(item_store)
-    if failure is not None:
-        raise failure
 
     items_by_id = {
         item[item_id_key]: item
@@ -835,6 +840,8 @@ def vol_compact_summary_items(
     if sort_key is not None:
         items.sort(key=sort_key, reverse=reverse)
     vol_put_summary_items(summary_store, items, key=key, payload_key=payload_key)
+    if failure is not None:
+        raise failure
     return items
 
 
