@@ -77,14 +77,6 @@ def serve():
     redirects = refresh_map(dist)
 
     @web.middleware("http")
-    async def legacy_host_redirect(request: Request, call_next):
-        host = request.headers.get("host", "").split(":")[0].lower()
-        if host in LEGACY_HOSTS:
-            url = request.url.replace(scheme="https", netloc=CANONICAL_HOST)
-            return RedirectResponse(url=str(url), status_code=301)
-        return await call_next(request)
-
-    @web.middleware("http")
     async def directory_index_without_slash(request: Request, call_next):
         path = request.url.path
         if path != "/" and path.endswith("/"):
@@ -117,6 +109,20 @@ def serve():
         query = request.url.query
         location = f"{target}?{query}" if query else target
         return RedirectResponse(url=location, status_code=redirect_status(path))
+
+    # Registered last so it runs outermost: legacy hosts get a single hop to the
+    # canonical host with the trailing slash and refresh redirects pre-applied.
+    @web.middleware("http")
+    async def legacy_host_redirect(request: Request, call_next):
+        host = request.headers.get("host", "").split(":")[0].lower()
+        if host not in LEGACY_HOSTS:
+            return await call_next(request)
+        path = request.url.path
+        if path != "/":
+            path = path.rstrip("/") or "/"
+        path = redirects.get(path, path)
+        url = request.url.replace(scheme="https", netloc=CANONICAL_HOST, path=path)
+        return RedirectResponse(url=str(url), status_code=301)
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

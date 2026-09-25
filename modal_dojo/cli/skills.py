@@ -175,8 +175,8 @@ def _ensure_claude_compatibility(
     *,
     skill_name: str,
     force: bool,
-) -> None:
-    """Expose the canonical skill to Claude when its paths are safe to manage."""
+) -> bool:
+    """Expose the canonical skill to Claude; return whether the link is in place."""
     skills_directory = project_root / CLAUDE_SKILLS_DIRECTORY
     link = skills_directory / skill_name
     symlinked_parent = _symlinked_claude_link_parent(project_root)
@@ -186,7 +186,7 @@ def _ensure_claude_compatibility(
             f"Skipped Claude skill link because {symlinked_parent} is a symbolic link.",
             err=True,
         )
-        return
+        return False
 
     link_is_symlink = link.is_symlink()
     link_exists = link_is_symlink or link.exists()
@@ -198,14 +198,14 @@ def _ensure_claude_compatibility(
             pass
     if link_points_to_canonical:
         click.echo(f"Claude skill already linked at {link}")
-        return
+        return True
     if link_exists and not force:
         click.echo(
             f"Skipped Claude skill link because {link} already exists; "
             "rerun with --force to replace it.",
             err=True,
         )
-        return
+        return False
 
     try:
         _install_claude_link(
@@ -216,24 +216,44 @@ def _ensure_claude_compatibility(
         )
     except CLIError as exc:
         click.echo(f"Skipped Claude skill link: {exc.format_message()}", err=True)
-        return
+        return False
     click.echo(f"Linked Claude skill at {link}")
+    return True
 
 
-def _remove_renamed_skills(project_root: Path, installed: set[str]) -> None:
-    """Delete skill directories left behind under a previous skill name."""
+def _remove_renamed_skills(
+    project_root: Path,
+    installed: set[str],
+    claude_linked: set[str],
+    *,
+    force: bool,
+) -> None:
+    """Clean up skill directories left behind under a previous skill name."""
     for old_name, new_name in RENAMED_SKILLS.items():
         if new_name not in installed:
             continue
+        canonical = project_root / SKILLS_DIRECTORY / old_name
         claude_link = project_root / CLAUDE_SKILLS_DIRECTORY / old_name
-        if _symlinked_claude_link_parent(project_root) is None and (
-            claude_link.is_symlink() or claude_link.exists()
+        canonical_exists = canonical.is_symlink() or canonical.exists()
+        claude_link_exists = claude_link.is_symlink() or claude_link.exists()
+        if not (canonical_exists or claude_link_exists):
+            continue
+        if not force:
+            click.echo(
+                f"{old_name} was renamed to {new_name}; rerun with --force to "
+                f"remove the old copy at {canonical}.",
+                err=True,
+            )
+            continue
+        if (
+            claude_link_exists
+            and new_name in claude_linked
+            and _symlinked_claude_link_parent(project_root) is None
         ):
             _remove_path(claude_link)
-        canonical = project_root / SKILLS_DIRECTORY / old_name
-        if canonical.is_symlink() or canonical.exists():
+        if canonical_exists:
             _remove_path(canonical)
-            click.echo(f"Removed {old_name} (renamed to {new_name})")
+        click.echo(f"Removed {old_name} (renamed to {new_name})")
 
 
 def _remove_path(path: Path) -> None:
@@ -278,15 +298,21 @@ def install_skills(*, project_dir: Path | None, force: bool) -> tuple[Path, ...]
             click.echo(f"Installed {skill_name} at {destination}")
         installed_destinations.append((skill_name, destination))
 
-    for skill_name, destination in installed_destinations:
-        _ensure_claude_compatibility(
+    claude_linked = {
+        skill_name
+        for skill_name, destination in installed_destinations
+        if _ensure_claude_compatibility(
             project_root,
             destination,
             skill_name=skill_name,
             force=force,
         )
+    }
     _remove_renamed_skills(
-        project_root, {skill_name for skill_name, _ in installed_destinations}
+        project_root,
+        {skill_name for skill_name, _ in installed_destinations},
+        claude_linked,
+        force=force,
     )
     return tuple(destination for _, destination in installed_destinations)
 

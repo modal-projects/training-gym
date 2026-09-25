@@ -9,6 +9,8 @@ import pytest
 from click.testing import CliRunner
 
 from modal_dojo import cli as cli_module
+from modal_dojo.cli import skills as skills_module
+from modal_dojo.cli.errors import CLIError
 from modal_dojo.cli.skills import (
     _bundled_skills,
 )
@@ -339,15 +341,51 @@ def test_skills_install_removes_renamed_training_gym_overview(monkeypatch, tmp_p
     old_link.parent.mkdir(parents=True)
     old_link.symlink_to(old_canonical, target_is_directory=True)
 
-    result = CliRunner().invoke(cli_module.entrypoint_cli, ["skills", "install"])
+    runner = CliRunner()
+    without_force = runner.invoke(cli_module.entrypoint_cli, ["skills", "install"])
 
-    assert result.exit_code == 0
-    assert "Removed training-gym-overview" in result.stdout
+    assert without_force.exit_code == 0
+    assert "rerun with --force" in without_force.stderr
+    assert old_canonical.is_dir()
+    assert old_link.is_symlink()
+
+    with_force = runner.invoke(
+        cli_module.entrypoint_cli, ["skills", "install", "--force"]
+    )
+
+    assert with_force.exit_code == 0
+    assert "Removed training-gym-overview" in with_force.stdout
     assert not old_canonical.exists()
     assert not old_link.is_symlink() and not old_link.exists()
     assert (
         tmp_path / ".agents" / "skills" / "modal-dojo-overview" / "SKILL.md"
     ).is_file()
+
+
+def test_skills_install_keeps_legacy_claude_link_when_new_link_fails(
+    monkeypatch, tmp_path
+):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    old_canonical = tmp_path / ".agents" / "skills" / "training-gym-overview"
+    old_canonical.mkdir(parents=True)
+    (old_canonical / "SKILL.md").write_text("old\n")
+    old_link = tmp_path / ".claude" / "skills" / "training-gym-overview"
+    old_link.parent.mkdir(parents=True)
+    old_link.symlink_to(old_canonical, target_is_directory=True)
+
+    def _fail(*args, **kwargs):
+        raise CLIError("nope", error="skill_install_failed")
+
+    monkeypatch.setattr(skills_module, "_install_claude_link", _fail)
+
+    result = CliRunner().invoke(
+        cli_module.entrypoint_cli, ["skills", "install", "--force"]
+    )
+
+    assert result.exit_code == 0
+    assert not old_canonical.exists()
+    assert old_link.is_symlink()
 
 
 def test_skills_install_requires_git_repo_without_project_dir(monkeypatch, tmp_path):
