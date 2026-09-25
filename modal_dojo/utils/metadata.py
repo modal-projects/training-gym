@@ -7,6 +7,7 @@ import io
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from functools import partial
 from typing import Any, Literal, TypeVar, cast, overload
@@ -16,6 +17,7 @@ from modal_dojo._api_reference import exclude_from_api_reference
 T = TypeVar("T")
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
+_READ_CONCURRENCY = 16
 
 
 @exclude_from_api_reference
@@ -172,7 +174,7 @@ async def bounded_gather_with_retries(
 ) -> list[T | BaseException]:
     from modal.exception import Error
 
-    semaphore = asyncio.Semaphore(16)
+    semaphore = asyncio.Semaphore(_READ_CONCURRENCY)
 
     async def _read(reader: Callable[[], Awaitable[T]]) -> T:
         async with semaphore:
@@ -491,41 +493,50 @@ def _read_metadata_records(
                 [lambda entry=entry: _read(entry["path"]) for entry in entries]
             )
             records: list[dict[str, Any]] = []
+            failure: BaseException | None = None
             for entry, result in zip(entries, results, strict=True):
                 if result is None:
                     continue
                 if isinstance(result, BaseException):
-                    return records, result
+                    failure = failure or result
+                    continue
                 if not isinstance(result, dict):
                     continue
                 records.append(result)
-            return records, None
+            return records, failure
 
         return _run()
 
-    records: list[dict[str, Any]] = []
-    for entry in entries:
-        record: Any = None
+    def _read_sync(path: str) -> Any:
         for attempt in range(_LIST_ATTEMPTS):
             try:
-                record = json.loads(b"".join(vol.read_file(entry["path"])))
-                break
-            except (FileNotFoundError, NotFoundError):
-                record = None
-                break
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                record = None
-                break
+                return json.loads(b"".join(vol.read_file(path)))
+            except (
+                FileNotFoundError,
+                NotFoundError,
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+            ):
+                return None
             except Error as exc:
                 if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
-                    return records, exc
+                    return exc
                 time.sleep(2**attempt)
-        if record is None:
+
+    records: list[dict[str, Any]] = []
+    failure: BaseException | None = None
+    with ThreadPoolExecutor(max_workers=_READ_CONCURRENCY) as pool:
+        results = list(pool.map(_read_sync, [entry["path"] for entry in entries]))
+    for result in results:
+        if result is None:
             continue
-        if not isinstance(record, dict):
+        if isinstance(result, BaseException):
+            failure = failure or result
             continue
-        records.append(record)
-    return records, None
+        if not isinstance(result, dict):
+            continue
+        records.append(result)
+    return records, failure
 
 
 @overload
@@ -809,16 +820,16 @@ def vol_compact_summary_items(
     upserts clobber each other, compaction merges the canonical files back into
     the summary so list readers become self-healing.
     """
-    summary_items = (
-        vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
+    summary_items = vol_get_summary_items(
+        summary_store, key=key, payload_key=payload_key
     )
     canonical_items, failure = _vol_list_core(item_store)
-    if failure is not None:
+    if failure is not None and summary_items is None:
         raise failure
 
     items_by_id = {
         item[item_id_key]: item
-        for item in summary_items
+        for item in summary_items or []
         if item.get(item_id_key) is not None
     }
     for item in canonical_items:
@@ -831,6 +842,8 @@ def vol_compact_summary_items(
     if sort_key is not None:
         items.sort(key=sort_key, reverse=reverse)
     vol_put_summary_items(summary_store, items, key=key, payload_key=payload_key)
+    if failure is not None:
+        raise failure
     return items
 
 
