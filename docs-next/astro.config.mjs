@@ -104,6 +104,8 @@ export default defineConfig({
     '/guides/tools/agent-driven-training': '/guides/agent',
     '/guides/agent-driven-training': '/guides/agent',
     '/reference': '/reference/sdk',
+    '/reference/traininggymerror': '/reference/trainingdojoerror',
+    '/reference/traininggymconfigerror': '/reference/trainingdojoconfigerror',
     '/reference/core/modelconfig': '/reference/modelconfig',
     '/reference/core/hfmodelconfiguration': '/reference/hfmodelconfiguration',
     '/reference/core/modelarchitecture': '/reference/modelarchitecture',

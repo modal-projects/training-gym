@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from modal_training_dojo.common import config as config_module
+from modal_dojo.common import config as config_module
 
 
 @pytest.fixture
 def config_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
-    new = tmp_path / ".training-dojo.toml"
+    new = tmp_path / ".modal-dojo.toml"
     legacy = tmp_path / ".training-gym.toml"
     monkeypatch.setattr(config_module, "CONFIG_PATH", new)
     monkeypatch.setattr(config_module, "LEGACY_CONFIG_PATH", legacy)

@@ -7,18 +7,18 @@ import time
 
 from fastapi.testclient import TestClient
 
-from modal_training_dojo import _dashboard
-from modal_training_dojo.common.framework import Framework
-from modal_training_dojo.common.metric_series import (
+from modal_dojo import _dashboard
+from modal_dojo.common.framework import Framework
+from modal_dojo.common.metric_series import (
     CHUNK_STEPS,
     MetricPoint,
     downsample,
     RunMetrics,
     metric_series,
 )
-from modal_training_dojo.common.run import TrainingRun, TrainingRunStatus
-from modal_training_dojo.utils import metadata
-from modal_training_dojo.utils.metadata import MetadataStore
+from modal_dojo.common.run import TrainingRun, TrainingRunStatus
+from modal_dojo.utils import metadata
+from modal_dojo.utils.metadata import MetadataStore
 
 RUN_ID = "metric-run"
 STORE = f"{MetadataStore.METRIC_SERIES.value}/{RUN_ID}"

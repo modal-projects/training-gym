@@ -1,6 +1,6 @@
 # Training Dojo
 
-> **Note:** The Training Gym has been renamed to the Training Dojo. Please update the upstream library name accordingly (`modal-training-gym` → `modal-training-dojo`, `import modal_training_gym` → `import modal_training_dojo`, and the `training-gym` CLI → `training-dojo`). The docs now live at [dojo.modal.dev](https://dojo.modal.dev), and the dashboard app is now named `training-dojo-dashboard` — re-run `training-dojo setup` and use the new dashboard URL it prints.
+> **Note:** The Training Gym has been renamed to the Training Dojo. Please update the upstream library name accordingly (`modal-training-gym` → `modal-dojo`, `import modal_training_gym` → `import modal_dojo`, and the `training-gym` CLI → `modal-dojo`). The docs now live at [dojo.modal.dev](https://dojo.modal.dev), and the dashboard app is now named `dojo-dashboard` — re-run `modal-dojo setup` and use the new dashboard URL it prints.
 
 Modal Training Dojo is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
 
@@ -9,7 +9,7 @@ The library takes care of infrastructure concerns such as cluster topology, Ray/
 To get started, you can go through the [Quickstart](https://dojo.modal.dev/#quickstart) section below, or paste the prompt below into your favorite agent:
 
 ```txt
-Install the `training-dojo` library. Then, install the skill bundle into the local project with `training-dojo skills install`. Finally, tell the user that they can ask you to do something like: "Walk through tutorials/rl_basics.py and train Qwen3.5-4B to write 5-7-5 haikus from statworx/haiku."
+Install the `modal-dojo` library. Then, install the skill bundle into the local project with `modal-dojo skills install`. Finally, tell the user that they can ask you to do something like: "Walk through tutorials/rl_basics.py and train Qwen3.5-4B to write 5-7-5 haikus from statworx/haiku."
 ```
 
 Docs: https://dojo.modal.dev/

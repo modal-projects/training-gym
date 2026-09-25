@@ -26,7 +26,7 @@ import random
 import sys
 from pathlib import Path
 
-from modal_training_dojo import (
+from modal_dojo import (
     DatasetConfig,
     Endpoint,
     Qwen3_5_4B,
@@ -35,7 +35,7 @@ from modal_training_dojo import (
     Sandbox,
     TrainConfig,
 )
-from modal_training_dojo.common.sample_extraction import IMAGE_SAMPLE_LIMIT_ENV
+from modal_dojo.common.sample_extraction import IMAGE_SAMPLE_LIMIT_ENV
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import helpers

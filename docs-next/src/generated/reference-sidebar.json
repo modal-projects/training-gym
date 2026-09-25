@@ -147,31 +147,31 @@
   ],
   "cli": [
     {
-      "label": "training-dojo run",
+      "label": "modal-dojo run",
       "link": "/reference/cli/run"
     },
     {
-      "label": "training-dojo skills",
+      "label": "modal-dojo skills",
       "link": "/reference/cli/skills"
     },
     {
-      "label": "training-dojo setup",
+      "label": "modal-dojo setup",
       "link": "/reference/cli/setup"
     },
     {
-      "label": "training-dojo set-password",
+      "label": "modal-dojo set-password",
       "link": "/reference/cli/set-password"
     },
     {
-      "label": "training-dojo set-proxy-auth",
+      "label": "modal-dojo set-proxy-auth",
       "link": "/reference/cli/set-proxy-auth"
     },
     {
-      "label": "training-dojo open",
+      "label": "modal-dojo open",
       "link": "/reference/cli/open"
     },
     {
-      "label": "training-dojo cleanup",
+      "label": "modal-dojo cleanup",
       "link": "/reference/cli/cleanup"
     }
   ]

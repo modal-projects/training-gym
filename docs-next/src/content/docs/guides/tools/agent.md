@@ -10,17 +10,17 @@ This guide demonstrates how to effectively use agents with the Dojo by getting C
 
 ## Set up
 
-First, we'll install the `training-dojo` CLI:
+First, we'll install the `modal-dojo` CLI:
 
 ```bash
 pip install -q git+https://github.com/modal-projects/training-gym.git@main
-training-dojo --help
+modal-dojo --help
 ```
 
 Then, we'll install the provided skills into our current project:
 
 ```bash
-training-dojo skills install
+modal-dojo skills install
 ```
 
 The main skill agents should use is `agent-driven-training`, which lays out the RL training lifecycle:
@@ -46,7 +46,7 @@ We leave it ambiguous to demonstrate that when empowered with the right tools an
 Since it is just writing Python code, we can easily inspect what it wrote. First, it loaded the dataset:
 
 ```python
-from modal_training_dojo import HuggingFaceDataset
+from modal_dojo import HuggingFaceDataset
 
 SYSTEM_PROMPT = (
     "You are a poet who answers every question in rhyme. Answer the question "
@@ -244,7 +244,7 @@ def rhyme_reward(response: str, reference: str) -> float:
 
 
 async def rhyme_rm(args, sample, **kwargs) -> float:
-    from modal_training_dojo import Qwen3_4B
+    from modal_dojo import Qwen3_4B
 
     model = Qwen3_4B()
     response = model.parse_response(getattr(sample, "response", "") or "")
@@ -255,8 +255,8 @@ async def rhyme_rm(args, sample, **kwargs) -> float:
 Then, it wrote the training code:
 
 ```python
-from modal_training_dojo import Qwen3_4B, TrainConfig
-from modal_training_dojo.train_recipes.slime_recipe import Qwen3_4B_Recipe
+from modal_dojo import Qwen3_4B, TrainConfig
+from modal_dojo.train_recipes.slime_recipe import Qwen3_4B_Recipe
 
 
 def _image_overlay(image):
@@ -308,28 +308,28 @@ Throughout the run, the agent used the following commands to:
 - Confirm a run was launched successfully:
 
 ```bash
-training-dojo run list --since 2h --json
+modal-dojo run list --since 2h --json
 ```
 
 - See the progress of a run in more detail:
 
 ```bash
-training-dojo run get <run-id> --verbose --json
+modal-dojo run get <run-id> --verbose --json
 ```
 
 - Inspect the logs of a failing or hanging run:
 
 ```bash
-training-dojo run logs <run-id> --json
-training-dojo run logs <run-id> --follow --json
-training-dojo run logs <run-id> --search "checkpoint" --json
+modal-dojo run logs <run-id> --json
+modal-dojo run logs <run-id> --follow --json
+modal-dojo run logs <run-id> --search "checkpoint" --json
 ```
 
 - Observe the raw model responses:
 
 ```bash
-training-dojo run trace <run-id> --out ./traces --dry-run --json
-training-dojo run trace <run-id> --out ./traces --yes --json
+modal-dojo run trace <run-id> --out ./traces --dry-run --json
+modal-dojo run trace <run-id> --out ./traces --yes --json
 ```
 
 ## Results

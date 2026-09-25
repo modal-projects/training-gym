@@ -5,12 +5,12 @@ import base64
 import httpx
 import pytest
 
-from modal_training_dojo.cli import client as client_module
-from modal_training_dojo.cli.client import (
+from modal_dojo.cli import client as client_module
+from modal_dojo.cli.client import (
     DEFAULT_TIMEOUT_SECONDS,
     DashboardClient,
 )
-from modal_training_dojo.cli.errors import CLIError, ExitCode
+from modal_dojo.cli.errors import CLIError, ExitCode
 
 
 @pytest.fixture(autouse=True)
@@ -93,7 +93,7 @@ def test_sends_basic_auth_when_password_exists(monkeypatch, mock_transport):
     with DashboardClient() as client:
         client.get_json("/api/items")
 
-    expected = base64.b64encode(b"training-dojo:secret").decode()
+    expected = base64.b64encode(b"modal-dojo:secret").decode()
     assert requests[0].headers["authorization"] == f"Basic {expected}"
 
 

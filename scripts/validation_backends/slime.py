@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from modal_training_dojo.common.dataset import (
+from modal_dojo.common.dataset import (
     DatasetConfig,
     MultimodalDataset,
 )
-from modal_training_dojo.common.models import ModelConfig
-from modal_training_dojo.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
-from modal_training_dojo.train_recipes.slime_recipe import SlimeRecipe
+from modal_dojo.common.models import ModelConfig
+from modal_dojo.common.models.qwen3_asr_1_7b import Qwen3_ASR_1_7B
+from modal_dojo.train_recipes.slime_recipe import SlimeRecipe
 
 VALIDATION_EPHEMERAL_DISK_MIB = 2_097_152
 

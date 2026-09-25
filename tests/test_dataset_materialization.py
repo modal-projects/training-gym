@@ -2,13 +2,13 @@ import json
 
 import pytest
 
-from modal_training_dojo.common.dataset import DatasetConfig, HarborDataset
-from modal_training_dojo.common.errors import TrainingDojoConfigError
-from modal_training_dojo.common.launcher_helpers import (
+from modal_dojo.common.dataset import DatasetConfig, HarborDataset
+from modal_dojo.common.errors import TrainingDojoConfigError
+from modal_dojo.common.launcher_helpers import (
     write_dataset_if_needed,
     write_datasets,
 )
-from modal_training_dojo.train_recipes.base import BaseTrainRecipe
+from modal_dojo.train_recipes.base import BaseTrainRecipe
 
 
 class RowsDataset(DatasetConfig):

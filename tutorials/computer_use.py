@@ -24,7 +24,7 @@
 import re
 import time
 
-from modal_training_dojo import (
+from modal_dojo import (
     CustomDeployment,
     MultimodalDataset,
     Qwen3_VL_8B,

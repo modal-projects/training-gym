@@ -1,14 +1,14 @@
 import yaml
 import pytest
 
-from modal_training_dojo.common.framework import Framework
-from modal_training_dojo.common.launcher_helpers import configured_recipe_save
-from modal_training_dojo.common.models import ModelConfig
-from modal_training_dojo.common.run import TrainingRun, set_checkpoint_location
-from modal_training_dojo.frameworks.miles.modal_helpers.utils import (
+from modal_dojo.common.framework import Framework
+from modal_dojo.common.launcher_helpers import configured_recipe_save
+from modal_dojo.common.models import ModelConfig
+from modal_dojo.common.run import TrainingRun, set_checkpoint_location
+from modal_dojo.frameworks.miles.modal_helpers.utils import (
     prepare_miles_config,
 )
-from modal_training_dojo.train_recipes.miles_recipe import MilesRecipe
+from modal_dojo.train_recipes.miles_recipe import MilesRecipe
 
 
 def test_explicitly_disabled_saving_omits_both_flags():

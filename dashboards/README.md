@@ -20,7 +20,7 @@ It is environment-agnostic; replace it for a deployment with your own Svelte
 component:
 
 ```bash
-training-dojo setup --trajectory-viewer ./MyTrajectoryViewer.svelte
+modal-dojo setup --trajectory-viewer ./MyTrajectoryViewer.svelte
 ```
 
 The component is mounted over
@@ -34,9 +34,9 @@ builds the dashboard. It receives these props:
 - `rollout`: the expanded `TrainingRolloutResult`.
 - `run`: the current `TrainingRun` summary.
 
-The override path is saved in `~/.training-dojo.toml`, so later `setup` or
+The override path is saved in `~/.modal-dojo.toml`, so later `setup` or
 password redeploys keep using it. To restore the built-in viewer, run
-`training-dojo setup --no-trajectory-viewer`.
+`modal-dojo setup --no-trajectory-viewer`.
 
 ## Run-scoped dashboard components
 
@@ -44,7 +44,7 @@ For a component that belongs to one run, attach it after launch instead of
 changing the global dashboard setup:
 
 ```python
-from modal_training_dojo import DashboardComponent, TrainingRun
+from modal_dojo import DashboardComponent, TrainingRun
 
 run = TrainingRun.from_id("bristled-pine-a7c3e91d4b")
 run.add_dashboard_component(

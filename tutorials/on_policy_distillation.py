@@ -44,7 +44,7 @@ import time
 
 from datasets import load_dataset
 
-from modal_training_dojo import (
+from modal_dojo import (
     CustomDeployment,
     DatasetConfig,
     Endpoint,

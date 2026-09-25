@@ -9,21 +9,21 @@ When doing RL post-training, experiment management and observability are particu
 Since it's just a [Modal App](https://modal.com/docs/guide/apps), you can get a dedicated dashboard for your workspace with:
 
 ```bash
-training-dojo setup
+modal-dojo setup
 ```
 
-Note that you'll have to rerun this command when you bump your `training-dojo` version.
+Note that you'll have to rerun this command when you bump your `modal-dojo` version.
 
 Once deployed, open the dashboard any time with:
 
 ```bash
-training-dojo open
+modal-dojo open
 ```
 
 By default, the dashboard is deployed without authentication. To put it behind HTTP Basic Auth, set a password:
 
 ```bash
-training-dojo set-password
+modal-dojo set-password
 ```
 
 ## At a glance
@@ -85,11 +85,11 @@ You'll see:
 Metadata from old failed or cancelled runs will accumulate in the dashboard over time. See what will be removed with:
 
 ```bash
-training-dojo cleanup --older-than-days 7 --dry-run
+modal-dojo cleanup --older-than-days 7 --dry-run
 ```
 
 Then execute:
 
 ```bash
-training-dojo cleanup --older-than-days 7
+modal-dojo cleanup --older-than-days 7
 ```

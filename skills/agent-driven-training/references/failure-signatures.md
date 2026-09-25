@@ -7,9 +7,9 @@ Use this reference when a Training Dojo run fails or appears hung.
 Start with the supported CLI:
 
 ```bash
-training-dojo run get <run-id> --verbose
-training-dojo run params <run-id>
-training-dojo run logs <run-id> --tail 200
+modal-dojo run get <run-id> --verbose
+modal-dojo run params <run-id>
+modal-dojo run logs <run-id> --tail 200
 ```
 
 Record the run status, phase, current/total step, last update, app ID, first
@@ -32,7 +32,7 @@ the failing component.
 ## Cleanup and relaunch
 
 If the authorized task includes stopping or fixing the run, obtain the Modal 
-app ID from `training-dojo run get`, then use:
+app ID from `modal-dojo run get`, then use:
 
 ```bash
 modal app stop <app-id>

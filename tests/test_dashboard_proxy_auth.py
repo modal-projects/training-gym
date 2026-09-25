@@ -8,12 +8,12 @@ from urllib.error import HTTPError, URLError
 import pytest
 from fastapi.testclient import TestClient
 
-from modal_training_dojo import _dashboard
-from modal_training_dojo.cli import setup as cli_setup_module
-from modal_training_dojo.common import config
-from modal_training_dojo.common import status_reporter
-from modal_training_dojo.common import reporting
-from modal_training_dojo.common.dashboard import (
+from modal_dojo import _dashboard
+from modal_dojo.cli import setup as cli_setup_module
+from modal_dojo.common import config
+from modal_dojo.common import status_reporter
+from modal_dojo.common import reporting
+from modal_dojo.common.dashboard import (
     DASHBOARD_VERSION,
     DashboardLookupUnknown,
     current_dashboard_version,
@@ -38,7 +38,7 @@ class _Response:
 
 @pytest.fixture
 def config_path(tmp_path, monkeypatch):
-    path = tmp_path / ".training-dojo.toml"
+    path = tmp_path / ".modal-dojo.toml"
     monkeypatch.setattr(config, "CONFIG_PATH", path)
     return path
 
@@ -101,7 +101,7 @@ def test_dashboard_import_sets_proxy_auth_mode(monkeypatch):
         return module
 
     monkeypatch.setattr(config, "_dashboard_requires_proxy_auth", False)
-    monkeypatch.setitem(sys.modules, "modal_training_dojo._dashboard", dashboard)
+    monkeypatch.setitem(sys.modules, "modal_dojo._dashboard", dashboard)
     monkeypatch.setattr(importlib, "reload", reload_module)
 
     loaded = cli_setup_module._load_dashboard_for_deploy(True)
