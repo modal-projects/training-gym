@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "modal_training_gym/**"
+      - "modal_training_dojo/**"
       - "synthetic_monitoring/**"
       - "scripts/**"
   schedule:

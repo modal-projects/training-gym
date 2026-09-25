@@ -1217,7 +1217,7 @@ wheels = [
 ]
 
 [[package]]
-name = "modal-training-gym"
+name = "modal-training-dojo"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -2,13 +2,13 @@ import json
 
 import pytest
 
-from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
-from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.launcher_helpers import (
+from modal_training_dojo.common.dataset import DatasetConfig, HarborDataset
+from modal_training_dojo.common.errors import TrainingDojoConfigError
+from modal_training_dojo.common.launcher_helpers import (
     write_dataset_if_needed,
     write_datasets,
 )
-from modal_training_gym.train_recipes.base import BaseTrainRecipe
+from modal_training_dojo.train_recipes.base import BaseTrainRecipe
 
 
 class RowsDataset(DatasetConfig):
@@ -113,15 +113,15 @@ def test_eval_dataset_fields_must_match_training_dataset():
         def apply_chat_template(self) -> bool:
             return False
 
-    with pytest.raises(TrainingGymConfigError, match="same input_key"):
+    with pytest.raises(TrainingDojoConfigError, match="same input_key"):
         BaseTrainRecipe._validate_datasets(
             RowsDataset("train"), OtherInputDataset("eval")
         )
-    with pytest.raises(TrainingGymConfigError, match="same label_key"):
+    with pytest.raises(TrainingDojoConfigError, match="same label_key"):
         BaseTrainRecipe._validate_datasets(
             RowsDataset("train"), OtherLabelDataset("eval")
         )
-    with pytest.raises(TrainingGymConfigError, match="same apply_chat_template"):
+    with pytest.raises(TrainingDojoConfigError, match="same apply_chat_template"):
         BaseTrainRecipe._validate_datasets(
             RowsDataset("train"), OtherChatTemplateDataset("eval")
         )

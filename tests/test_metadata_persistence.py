@@ -18,20 +18,20 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from modal_training_gym.common import run as run_mod
-from modal_training_gym.common.framework import Framework
-from modal_training_gym.common import launcher_helpers
-from modal_training_gym.common.launcher_helpers import (
+from modal_training_dojo.common import run as run_mod
+from modal_training_dojo.common.framework import Framework
+from modal_training_dojo.common import launcher_helpers
+from modal_training_dojo.common.launcher_helpers import (
     complete_training_run,
     training_run_lifecycle,
 )
-from modal_training_gym.common.train_result import (
+from modal_training_dojo.common.train_result import (
     save_train_result_blob,
     train_result_payload,
 )
-from modal_training_gym.common.training_rollout import TrainingRolloutResult
-from modal_training_gym.utils import metadata
-from modal_training_gym.utils.metadata import MetadataStore
+from modal_training_dojo.common.training_rollout import TrainingRolloutResult
+from modal_training_dojo.utils import metadata
+from modal_training_dojo.utils.metadata import MetadataStore
 
 
 @pytest.mark.parametrize(
@@ -244,16 +244,16 @@ def test_remote_save_from_unmounted_container():
     image = (
         modal.Image.debian_slim(python_version="3.12")
         .pip_install("modal>=1.4.0", "pydantic")
-        .add_local_python_source("modal_training_gym")
+        .add_local_python_source("modal_training_dojo")
     )
     app = modal.App("training-gym-metadata-save-probe")
 
     # NB: deliberately no volumes= — this is the unmounted case.
     @app.function(image=image, serialized=True)
     def _save_probe() -> str:
-        from modal_training_gym.common.framework import Framework
-        from modal_training_gym.common.run import TrainingRun
-        from modal_training_gym.common.train_result import (
+        from modal_training_dojo.common.framework import Framework
+        from modal_training_dojo.common.run import TrainingRun
+        from modal_training_dojo.common.train_result import (
             save_train_result_blob,
             train_result_payload,
         )

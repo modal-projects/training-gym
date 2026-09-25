@@ -21,7 +21,7 @@
     position = null,
   } = $props();
 
-  const MARK = "trainingGymDashboardComponent";
+  const MARK = "trainingDojoDashboardComponent";
   const READY_TIMEOUT_MS = 20000;
   // Components can be attached after a run finishes, when the page has
   // stopped polling `run`; re-check the manifest so they still show up.

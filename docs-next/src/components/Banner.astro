@@ -1,0 +1,23 @@
+---
+import Default from '@astrojs/starlight/components/Banner.astro';
+---
+
+<div class="tg-rename-banner">
+  The Training Gym has been renamed to the Training Dojo. Please update the upstream library name
+  accordingly (<code>modal-training-gym</code> → <code>modal-training-dojo</code>).
+</div>
+<Default {...Astro.props}><slot /></Default>
+
+<style>
+  .tg-rename-banner {
+    padding: 0.5rem 1rem;
+    text-align: center;
+    font-size: var(--sl-text-sm);
+    line-height: 1.5;
+    background-color: var(--sl-color-accent-low);
+    color: var(--sl-color-white);
+  }
+  .tg-rename-banner code {
+    font-size: 0.9em;
+  }
+</style>

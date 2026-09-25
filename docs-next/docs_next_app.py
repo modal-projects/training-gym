@@ -46,6 +46,9 @@ image = (
 
 app = modal.App("training-gym-docs", image=image)
 
+CANONICAL_HOST = "dojo.modal.dev"
+LEGACY_HOSTS = frozenset({"gym.modal.dev"})
+
 
 def cache_control_value(path: str, content_type: str) -> str | None:
     if path.startswith("/_astro/"):
@@ -61,7 +64,7 @@ def cache_control_value(path: str, content_type: str) -> str | None:
 
 @app.function(min_containers=1)
 @modal.concurrent(max_inputs=100)
-@modal.asgi_app(custom_domains=["gym.modal.dev"])
+@modal.asgi_app(custom_domains=[CANONICAL_HOST, *sorted(LEGACY_HOSTS)])
 def serve():
     from fastapi import FastAPI, Request, Response
     from fastapi.middleware.gzip import GZipMiddleware
@@ -72,6 +75,14 @@ def serve():
     web.add_middleware(GZipMiddleware, minimum_size=500)
     dist = Path(REMOTE_DIST)
     redirects = refresh_map(dist)
+
+    @web.middleware("http")
+    async def legacy_host_redirect(request: Request, call_next):
+        host = request.headers.get("host", "").split(":")[0].lower()
+        if host in LEGACY_HOSTS:
+            url = request.url.replace(scheme="https", netloc=CANONICAL_HOST)
+            return RedirectResponse(url=str(url), status_code=301)
+        return await call_next(request)
 
     @web.middleware("http")
     async def directory_index_without_slash(request: Request, call_next):

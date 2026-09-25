@@ -7,28 +7,28 @@ from typing import Any
 
 import pytest
 
-from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.launcher_utils import (
+from modal_training_dojo.common.dataset import HuggingFaceDataset
+from modal_training_dojo.common.launcher_utils import (
     get_checkpoint_conversion_policy,
     prepare_launch_config,
 )
-from modal_training_gym.common.models import Qwen3_4B
-from modal_training_gym.common.models.validation import Framework, _ValidationConfig
-from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.train_recipes.gpu_allocation import (
+from modal_training_dojo.common.models import Qwen3_4B
+from modal_training_dojo.common.models.validation import Framework, _ValidationConfig
+from modal_training_dojo.common.train import TrainConfig
+from modal_training_dojo.train_recipes.gpu_allocation import (
     validate_megatron_actor_parallelism,
 )
-from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-from modal_training_gym.train_recipes.miles_recipe.gemma4_26b_a4b import (
+from modal_training_dojo.train_recipes.miles_recipe import MilesRecipe
+from modal_training_dojo.train_recipes.miles_recipe.gemma4_26b_a4b import (
     Gemma4_26B_A4B_Recipe,
 )
-from modal_training_gym.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
-from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
-from modal_training_gym.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
+from modal_training_dojo.train_recipes.miles_recipe.inkling import Inkling_Small_Recipe
+from modal_training_dojo.train_recipes.slime_recipe import SlimeRecipe
+from modal_training_dojo.train_recipes.slime_recipe.qwen3_4b import Qwen3_4B_Recipe
 
 _RECIPE_PACKAGES = (
-    "modal_training_gym.train_recipes.slime_recipe",
-    "modal_training_gym.train_recipes.miles_recipe",
+    "modal_training_dojo.train_recipes.slime_recipe",
+    "modal_training_dojo.train_recipes.miles_recipe",
 )
 
 _BASE_RECIPE = {

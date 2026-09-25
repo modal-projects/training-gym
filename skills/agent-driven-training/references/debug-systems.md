@@ -6,9 +6,9 @@ evaluation is slower or less stable than expected.
 ## Locate the time
 
 ```bash
-training-gym run get <run-id> --verbose
-training-gym run params <run-id>
-training-gym run logs <run-id> --tail 200
+training-dojo run get <run-id> --verbose
+training-dojo run params <run-id>
+training-dojo run logs <run-id> --tail 200
 ```
 
 Separate one-time startup from steady-state step time. Identify the dominant

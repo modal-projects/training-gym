@@ -109,16 +109,16 @@
       "link": "/reference/trainconfig"
     },
     {
+      "label": "TrainingDojoConfigError",
+      "link": "/reference/trainingdojoconfigerror"
+    },
+    {
+      "label": "TrainingDojoError",
+      "link": "/reference/trainingdojoerror"
+    },
+    {
       "label": "TrainingGroup",
       "link": "/reference/traininggroup"
-    },
-    {
-      "label": "TrainingGymConfigError",
-      "link": "/reference/traininggymconfigerror"
-    },
-    {
-      "label": "TrainingGymError",
-      "link": "/reference/traininggymerror"
     },
     {
       "label": "TrainingRun",
@@ -147,31 +147,31 @@
   ],
   "cli": [
     {
-      "label": "training-gym run",
+      "label": "training-dojo run",
       "link": "/reference/cli/run"
     },
     {
-      "label": "training-gym skills",
+      "label": "training-dojo skills",
       "link": "/reference/cli/skills"
     },
     {
-      "label": "training-gym setup",
+      "label": "training-dojo setup",
       "link": "/reference/cli/setup"
     },
     {
-      "label": "training-gym set-password",
+      "label": "training-dojo set-password",
       "link": "/reference/cli/set-password"
     },
     {
-      "label": "training-gym set-proxy-auth",
+      "label": "training-dojo set-proxy-auth",
       "link": "/reference/cli/set-proxy-auth"
     },
     {
-      "label": "training-gym open",
+      "label": "training-dojo open",
       "link": "/reference/cli/open"
     },
     {
-      "label": "training-gym cleanup",
+      "label": "training-dojo cleanup",
       "link": "/reference/cli/cleanup"
     }
   ]
