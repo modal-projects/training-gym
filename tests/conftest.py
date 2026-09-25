@@ -39,6 +39,8 @@ class FakeVolume:
 
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
+        self.mtimes: dict[str, int] = {}
+        self.clock = 0
         self.reload = _Method(self._reload, self._reload_async)
         self.read_file = _Method(self._read_file, self._read_file_async)
         self.iterdir = _Method(self._iterdir, self._iterdir_async)
@@ -67,7 +69,7 @@ class FakeVolume:
     def _iterdir(self, path: str):
         prefix = path.rstrip("/") + "/"
         return [
-            self._DirEntry(f, mtime=1, size=len(self.files[f]))
+            self._DirEntry(f, mtime=self.mtimes.get(f, 1), size=len(self.files[f]))
             for f in self.files
             if f.startswith(prefix)
         ]
@@ -77,7 +79,7 @@ class FakeVolume:
             yield entry
 
     def batch_upload(self, force: bool = False):
-        files = self.files
+        volume = self
 
         class _Batch:
             def __enter__(self):
@@ -93,7 +95,9 @@ class FakeVolume:
                 return False
 
             def put_file(self, fileobj: io.BytesIO, path: str) -> None:
-                files[path] = fileobj.read()
+                volume.clock += 1
+                volume.files[path] = fileobj.read()
+                volume.mtimes[path] = volume.clock
 
         return _Batch()
 

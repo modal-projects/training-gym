@@ -7,6 +7,7 @@ import io
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from functools import partial
 from typing import Any, Literal, TypeVar, cast, overload
@@ -48,12 +49,20 @@ class MetadataStore(Enum):
 
 SUMMARY_KEY = "summary"
 SUMMARY_ITEMS_KEY = "items"
+# Sibling of the summary file recording the newest canonical mtime folded into
+# it, so the next compaction only reads files changed since.
+COMPACTION_KEY = "compaction"
+COMPACTION_MTIME_KEY = "mtime"
+
+_READ_CONCURRENCY = 16
 
 
 # Summary stores whose canonical per-item files share the summary's shape, so a
 # collapsed/stale summary can be rebuilt from the canonical files rather than
-# trusted blindly. Rollouts are intentionally excluded: their canonical files
-# hold full sample payloads, not the reduced summary shape.
+# trusted blindly. Canonical files must be keyed by ``item_id_key`` (the file
+# basename is the item id) so compaction can spot missing items from a
+# directory listing alone. Rollouts are intentionally excluded: their canonical
+# files hold full sample payloads, not the reduced summary shape.
 class _SummaryCompaction:
     __slots__ = ("item_store", "item_id_key", "sort_key", "reverse")
 
@@ -503,28 +512,33 @@ def _read_metadata_records(
 
         return _run()
 
-    records: list[dict[str, Any]] = []
-    for entry in entries:
-        record: Any = None
+    def _read_sync(path: str) -> Any:
         for attempt in range(_LIST_ATTEMPTS):
             try:
-                record = json.loads(b"".join(vol.read_file(entry["path"])))
-                break
+                return json.loads(b"".join(vol.read_file(path)))
             except (FileNotFoundError, NotFoundError):
-                record = None
-                break
+                return None
             except (json.JSONDecodeError, UnicodeDecodeError):
-                record = None
-                break
+                return None
             except Error as exc:
                 if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
-                    return records, exc
+                    return exc
                 time.sleep(2**attempt)
-        if record is None:
+        raise AssertionError("unreachable")
+
+    records: list[dict[str, Any]] = []
+    if not entries:
+        return records, None
+    with ThreadPoolExecutor(max_workers=min(_READ_CONCURRENCY, len(entries))) as pool:
+        results = list(pool.map(_read_sync, [entry["path"] for entry in entries]))
+    for result in results:
+        if result is None:
             continue
-        if not isinstance(record, dict):
+        if isinstance(result, BaseException):
+            return records, result
+        if not isinstance(result, dict):
             continue
-        records.append(record)
+        records.append(result)
     return records, None
 
 
@@ -676,8 +690,13 @@ def vol_count_items(store: MetadataStore | str) -> int:
         return 0
 
 
-def compact_summary_store(summary_store: MetadataStore) -> list[dict[str, Any]]:
-    """Rebuild a registered summary from its canonical per-item files."""
+def compact_summary_store(
+    summary_store: MetadataStore, *, full: bool = False
+) -> list[dict[str, Any]]:
+    """Fold canonical per-item files into a registered summary.
+
+    Incremental by default; ``full=True`` re-reads every canonical file.
+    """
     cfg = _SUMMARY_COMPACTION[summary_store]
     return vol_compact_summary_items(
         summary_store,
@@ -685,6 +704,7 @@ def compact_summary_store(summary_store: MetadataStore) -> list[dict[str, Any]]:
         item_id_key=cfg.item_id_key,
         sort_key=cfg.sort_key,
         reverse=cfg.reverse,
+        full=full,
     )
 
 
@@ -801,18 +821,26 @@ def vol_compact_summary_items(
     payload_key: str = SUMMARY_ITEMS_KEY,
     sort_key: Callable[[dict[str, Any]], Any] | None = None,
     reverse: bool = False,
+    full: bool = False,
 ) -> list[dict[str, Any]]:
-    """Rebuild a denormalized summary from canonical per-item metadata files.
+    """Fold canonical per-item metadata files into a denormalized summary.
 
     Summary files are a list cache. Writers persist the canonical item file first,
     then best-effort update the summary. If parallel read-modify-write summary
     upserts clobber each other, compaction merges the canonical files back into
     the summary so list readers become self-healing.
+
+    The directory listing is one cheap call and carries each file's mtime, so
+    only files modified since the last compaction (recorded under
+    ``COMPACTION_KEY``) or whose id is absent from the summary are read. That
+    keeps a run proportional to the change set rather than the store size,
+    while a clobbered summary still heals: its dropped ids show up as missing
+    and are re-read. ``full=True`` (or no recorded watermark) reads everything.
     """
     summary_items = (
         vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
     )
-    canonical_items, failure = _vol_list_core(item_store)
+    entries, failure = _list_metadata_entries(item_store)
     if failure is not None:
         raise failure
 
@@ -821,6 +849,21 @@ def vol_compact_summary_items(
         for item in summary_items
         if item.get(item_id_key) is not None
     }
+
+    watermark = None if full else _compaction_watermark(summary_store)
+    if watermark is None:
+        to_read = entries
+    else:
+        to_read = [
+            entry
+            for entry in entries
+            if entry["mtime"] >= watermark
+            or _entry_key(entry["path"]) not in items_by_id
+        ]
+    canonical_items, failure = _read_metadata_records(to_read)
+    if failure is not None:
+        raise failure
+
     for item in canonical_items:
         item_id = item.get(item_id_key)
         if item_id is None:
@@ -831,7 +874,32 @@ def vol_compact_summary_items(
     if sort_key is not None:
         items.sort(key=sort_key, reverse=reverse)
     vol_put_summary_items(summary_store, items, key=key, payload_key=payload_key)
+    # Written after the summary so a failure between the two only costs a
+    # re-read next time, never a skipped file.
+    if entries:
+        vol_put(
+            summary_store,
+            COMPACTION_KEY,
+            {COMPACTION_MTIME_KEY: max(entry["mtime"] for entry in entries)},
+        )
     return items
+
+
+def _entry_key(path: str) -> str:
+    return path.rsplit("/", 1)[-1][: -len(".json")]
+
+
+def _compaction_watermark(summary_store: MetadataStore | str) -> int | None:
+    from modal.exception import ExecutionError
+
+    try:
+        payload = vol_get(summary_store, COMPACTION_KEY)
+    except KeyError:
+        return None
+    except (ExecutionError, ValueError):
+        return None
+    mtime = payload.get(COMPACTION_MTIME_KEY) if isinstance(payload, dict) else None
+    return mtime if isinstance(mtime, int) else None
 
 
 def vol_upsert_summary_item(
@@ -922,6 +990,7 @@ __all__ = [
     "MetadataStore",
     "SUMMARY_ITEMS_KEY",
     "SUMMARY_KEY",
+    "COMPACTION_KEY",
     "summary_items_from_payload",
     "bounded_gather_with_retries",
     "vol_get",
