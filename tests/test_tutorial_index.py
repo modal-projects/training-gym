@@ -96,7 +96,7 @@ def test_homepage_frontmatter_is_order_only(tmp_path: Path) -> None:
     generate_starlight(tmp_path)
     text = (tmp_path / "index.md").read_text()
     assert _frontmatter_lines(text) == ["order: 0"]
-    assert "\n# Training Dojo\n" in text
+    assert "\n# Modal Dojo\n" in text
 
 
 def test_authored_pages_use_order_and_h1() -> None:
@@ -140,7 +140,7 @@ def test_collect_guides_orders_by_section_then_order() -> None:
 
 def test_readme_heading_and_intro_skips_badges_and_rewrites_anchors() -> None:
     markdown = (
-        "# Training Dojo\n"
+        "# Modal Dojo\n"
         "\n"
         "[![ci](https://img.shields.io/badge/ci-ok)](https://example.com)\n"
         "\n"
@@ -151,7 +151,7 @@ def test_readme_heading_and_intro_skips_badges_and_rewrites_anchors() -> None:
         "## Quickstart\n"
     )
     assert _readme_heading_and_intro(markdown) == (
-        "Training Dojo",
+        "Modal Dojo",
         "First paragraph with a "
         "[Quickstart](https://dojo.modal.dev/#quickstart).\n\n"
         "Second paragraph.",

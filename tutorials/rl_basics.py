@@ -5,7 +5,7 @@
 #
 # # Getting started with RL
 #
-# This tutorial introduces some core features of the Training Dojo by walking through
+# This tutorial introduces some core features of Modal Dojo by walking through
 # a simple example of Reinforcement Learning with Verifiable Rewards (RLVR), a
 # foundational method of RL post-training. Here, we teach
 # [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)

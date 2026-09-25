@@ -361,7 +361,7 @@ class SlimeRecipe(BaseTrainRecipe):
             Public HTTPS Git repository to overlay onto the image's slime checkout.
             Must be paired with ``slime_git_revision`` and is intended for
             reproducible fork-backed runs. The selected source must remain compatible
-            with Training Dojo's build-time Slime patches.
+            with Modal Dojo's build-time Slime patches.
         slime_git_revision:
             Full 40-character commit SHA fetched from ``slime_git_repository``.
             Branches and tags are rejected because they can move between runs.

@@ -1,8 +1,8 @@
-# Training Dojo
+# Modal Dojo
 
-> **Note:** The Training Gym has been renamed to the Training Dojo. Please update the upstream library name accordingly (`modal-training-gym` → `modal-dojo`, `import modal_training_gym` → `import modal_dojo`, and the `training-gym` CLI → `modal-dojo`). The docs now live at [dojo.modal.dev](https://dojo.modal.dev), and the dashboard app is now named `dojo-dashboard` — re-run `modal-dojo setup` and use the new dashboard URL it prints.
+> **Note:** The Training Gym has been renamed to Modal Dojo. Please update the upstream library name accordingly (`modal-training-gym` → `modal-dojo`, `import modal_training_gym` → `import modal_dojo`, and the `training-gym` CLI → `modal-dojo`). The docs now live at [dojo.modal.dev](https://dojo.modal.dev), and the dashboard app is now named `dojo-dashboard` — re-run `modal-dojo setup` and use the new dashboard URL it prints.
 
-Modal Training Dojo is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
+Modal Dojo is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
 
 The library takes care of infrastructure concerns such as cluster topology, Ray/NCCL bring-up, volume mounts, checkpointing, and serving for eval and rollouts, so you (or your agent!) can focus on training models.
 

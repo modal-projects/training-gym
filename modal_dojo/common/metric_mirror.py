@@ -43,7 +43,7 @@ _PTH_LINE = (
 
 @dataclass
 class DashboardMetricConfig(MetricConfig):
-    """Log framework metrics to the Training Dojo dashboard only.
+    """Log framework metrics to the Modal Dojo dashboard only.
 
     Slime and Miles keep calling ``wandb.*``; a W&B-shaped shim routes the
     scalars to the dashboard's Metrics tab. No W&B account, API key or Trackio

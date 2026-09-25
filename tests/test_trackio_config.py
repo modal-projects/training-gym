@@ -129,7 +129,7 @@ def test_trackio_image_installs_trackio_and_the_metric_bootstrap():
 
 
 def test_trackio_package_version_is_configurable():
-    """A pinned default, but bumpable without waiting on a Training Dojo release."""
+    """A pinned default, but bumpable without waiting on a Modal Dojo release."""
     image = _FakeImage()
     apply_metric_image(image, TrackioConfig(TRACKIO_PACKAGE_VERSION="0.35.0"))
 

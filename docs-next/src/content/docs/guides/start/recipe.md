@@ -19,7 +19,7 @@ from modal_dojo import Qwen3_5_4B_Recipe
 recipe = Qwen3_5_4B_Recipe()
 ```
 
-We provide optimized recipes for all supported models in the Training Dojo, but note that they are easily extensible to fit whatever use case you may have. Under the hood, each recipe is backed by one of two backend frameworks: [Miles](https://github.com/radixark/miles) or [Slime](https://github.com/THUDM/slime). All recipes allow you to specify framework-native parameters using the corresponding recipe fields.
+We provide optimized recipes for all supported models in Modal Dojo, but note that they are easily extensible to fit whatever use case you may have. Under the hood, each recipe is backed by one of two backend frameworks: [Miles](https://github.com/radixark/miles) or [Slime](https://github.com/THUDM/slime). All recipes allow you to specify framework-native parameters using the corresponding recipe fields.
 
 This guide will focus on the most important ones. However, you can see the full lists for each of the base classes (i.e., [MilesRecipe](https://dojo.modal.dev/reference/milesrecipe) and [SlimeRecipe](https://dojo.modal.dev/reference/slimerecipe)).
 

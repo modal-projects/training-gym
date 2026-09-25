@@ -4,7 +4,7 @@ order: 0
 
 # Migrating to the new dataset API
 
-New versions of the Training Dojo feature a reworked `DatasetConfig` API that is simpler and easier to customize. This guide breaks down the breaking changes so you can migrate your existing datasets to the new API.
+New versions of Modal Dojo feature a reworked `DatasetConfig` API that is simpler and easier to customize. This guide breaks down the breaking changes so you can migrate your existing datasets to the new API.
 
 ## Training and evaluation datasets are now separate
 

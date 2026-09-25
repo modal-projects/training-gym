@@ -1,4 +1,4 @@
-# Training Dojo docs site
+# Modal Dojo docs site
 
 The [dojo.modal.dev](https://dojo.modal.dev) docs are a
 [Starlight](https://starlight.astro.build/) site on Astro, packaged as a

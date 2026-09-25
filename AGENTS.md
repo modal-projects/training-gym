@@ -124,7 +124,7 @@ Tutorials are `tutorials/*.py` or `tutorials/<name>/main.py` with sibling helper
   below are the only available skills.
 - For training lifecycle work, read `skills/agent-driven-training/SKILL.md`
   before acting. This includes launching, monitoring, inspecting, diagnosing,
-  continuing, or promoting a Training Dojo run.
+  continuing, or promoting a Modal Dojo run.
 - For raw Modal infrastructure work, read
   `skills/modal-infrastructure/SKILL.md` before acting. Use it for apps,
   containers, volumes, scheduling, image builds, caches, and endpoint

@@ -328,12 +328,12 @@ def ensure_dashboard_deployed() -> str | None:
             if not is_dashboard_upgrade(incoming, deployed):
                 return web_url
             print(
-                f"Training Dojo dashboard ({DASHBOARD_APP_NAME!r}) is older than "
+                f"Modal Dojo dashboard ({DASHBOARD_APP_NAME!r}) is older than "
                 f"this dashboard ({incoming}): redeploying it."
             )
         else:
             print(
-                f"Training Dojo dashboard ({DASHBOARD_APP_NAME!r}) is not deployed: "
+                f"Modal Dojo dashboard ({DASHBOARD_APP_NAME!r}) is not deployed: "
                 "deploying it now."
             )
         return setup(

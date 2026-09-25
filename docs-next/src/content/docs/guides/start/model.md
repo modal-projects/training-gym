@@ -4,7 +4,7 @@ order: 0
 
 # Choosing a base model
 
-The first step to training is choosing a base model. The Training Dojo supports the [top](https://dojo.modal.dev/#supported-models) open-source LLMs and VLMs. 
+The first step to training is choosing a base model. Modal Dojo supports the [top](https://dojo.modal.dev/#supported-models) open-source LLMs and VLMs. 
 
 ## How do I choose?
 

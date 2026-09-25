@@ -11,7 +11,7 @@ when_to_use: >-
   configs, shared internals, or repository structure.
 ---
 
-# Training Dojo Overview
+# Modal Dojo Overview
 
 One-stop reference for agents asked to build, modify, or validate tutorials
 and examples in this repo. Pairs with

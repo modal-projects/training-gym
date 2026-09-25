@@ -1,12 +1,12 @@
 ---
 name: agent-driven-training
 description: >-
-  Owns the complete Training Dojo lifecycle or one requested stage: configure,
+  Owns the complete Modal Dojo lifecycle or one requested stage: configure,
   prove, smoke test, monitor, diagnose, continue, and promote.
 when_to_use: >-
   User asks to train, post-train, fine-tune, or improve a model; launch a
   config; inspect run status or logs; debug failure, reward, or performance;
-  continue a checkpoint; or promote a Training Dojo run.
+  continue a checkpoint; or promote a Modal Dojo run.
 ---
 
 # Agent-driven training

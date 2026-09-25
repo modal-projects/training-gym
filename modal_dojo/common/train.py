@@ -226,7 +226,7 @@ class _TrainStatusDisplay:
         self._get_console().print(
             Panel(
                 body,
-                title="[bold]Training Dojo[/bold]",
+                title="[bold]Modal Dojo[/bold]",
                 title_align="left",
                 border_style="cyan",
                 padding=(1, 2),
