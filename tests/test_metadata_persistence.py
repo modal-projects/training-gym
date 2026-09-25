@@ -349,3 +349,40 @@ def test_compaction_writes_readable_records_before_raising(fake_volume, monkeypa
         "run-1": "running",
         "run-2": "completed",
     }
+
+
+def test_compaction_keeps_unread_summary_when_canonical_read_fails(
+    fake_volume, monkeypatch
+):
+    summary = [{"training_run_id": f"run-{i}", "status": "running"} for i in range(2)]
+    metadata.vol_put_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY, summary)
+    for i in range(2):
+        metadata.vol_put(
+            MetadataStore.TRAINING_RUNS,
+            f"run-{i}",
+            {"training_run_id": f"run-{i}", "status": "completed"},
+        )
+    unreadable = {
+        f"{metadata._store_path(MetadataStore.TRAINING_RUNS_SUMMARY)}/{metadata.SUMMARY_KEY}.json",
+        f"{metadata._store_path(MetadataStore.TRAINING_RUNS)}/run-1.json",
+    }
+    read_file = fake_volume.read_file
+
+    def read_or_fail(path: str):
+        if path in unreadable:
+            raise ExecutionError("block not found")
+        return read_file(path)
+
+    monkeypatch.setattr(fake_volume, "read_file", read_or_fail)
+
+    with pytest.raises(ExecutionError):
+        metadata.vol_compact_summary_items(
+            MetadataStore.TRAINING_RUNS_SUMMARY,
+            MetadataStore.TRAINING_RUNS,
+            item_id_key="training_run_id",
+        )
+
+    monkeypatch.setattr(fake_volume, "read_file", read_file)
+    assert (
+        metadata.vol_get_summary_items(MetadataStore.TRAINING_RUNS_SUMMARY) == summary
+    )

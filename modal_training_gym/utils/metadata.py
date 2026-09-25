@@ -820,14 +820,16 @@ def vol_compact_summary_items(
     upserts clobber each other, compaction merges the canonical files back into
     the summary so list readers become self-healing.
     """
-    summary_items = (
-        vol_get_summary_items(summary_store, key=key, payload_key=payload_key) or []
+    summary_items = vol_get_summary_items(
+        summary_store, key=key, payload_key=payload_key
     )
     canonical_items, failure = _vol_list_core(item_store)
+    if failure is not None and summary_items is None:
+        raise failure
 
     items_by_id = {
         item[item_id_key]: item
-        for item in summary_items
+        for item in summary_items or []
         if item.get(item_id_key) is not None
     }
     for item in canonical_items:
