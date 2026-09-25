@@ -10,6 +10,11 @@ A ``.pth`` in the training image imports this module in every interpreter, and
 
 Points are coalesced per step and shipped on the reporting queue, so they carry
 the per-run bearer token, never block training and drain at process exit.
+
+``wandb.define_metric(name, step_metric=...)`` picks the x-axis the way W&B
+does: Slime logs ``rollout/*`` next to ``rollout/step`` (and ``train/*`` next
+to ``train/step``) without ``step=``, so those land on the step metric's value
+rather than on the implicit per-call counter.
 """
 
 from __future__ import annotations
@@ -115,15 +120,32 @@ class MetricMirror:
 
     Step semantics follow ``wandb.log``: ``step=None`` lands on an implicit
     counter that advances unless ``commit=False``; an explicit step moves the
-    counter forward, never back.
+    counter forward, never back. Keys covered by ``define_metric(...,
+    step_metric=)`` land on that metric's value when it is logged alongside
+    them; the step metrics themselves are not charted.
     """
 
     def __init__(self, training_run_id: str) -> None:
         self.training_run_id = training_run_id
         self._pending: dict[int, dict[str, float]] = {}
         self._next_step = 0
+        self._step_metrics: dict[str, str] = {}  # key or `prefix/*` -> step metric
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
+
+    def define_metric(self, name: str, step_metric: str | None = None) -> None:
+        name, step_metric = str(name), str(step_metric or "")
+        if step_metric and step_metric != name:
+            with self._lock:
+                self._step_metrics[name] = step_metric
+
+    def _step_metric_for(self, key: str) -> str | None:
+        if key in self._step_metrics:
+            return self._step_metrics[key]
+        for pattern, step_metric in reversed(self._step_metrics.items()):
+            if pattern.endswith("*") and key.startswith(pattern[:-1]):
+                return step_metric
+        return None
 
     def log(
         self,
@@ -142,9 +164,17 @@ class MetricMirror:
                 return
             else:
                 self._next_step = max(self._next_step, step)
-            if not metrics:
+            axes = set(self._step_metrics.values())
+            for key, value in metrics.items():
+                if key in axes:
+                    continue
+                step_metric = self._step_metric_for(key)
+                at = metrics.get(step_metric) if step_metric else None
+                key_step = step if at is None else int(at)
+                if key_step >= 0:
+                    self._pending.setdefault(key_step, {})[key] = value
+            if not self._pending:
                 return
-            self._pending.setdefault(step, {}).update(metrics)
             if self._timer is None:
                 self._timer = threading.Timer(FLUSH_INTERVAL_SECONDS, self.flush)
                 self._timer.daemon = True
@@ -176,22 +206,37 @@ _MIRROR: MetricMirror | None = None
 _MIRROR_LOCK = threading.Lock()
 
 
+def _mirror() -> MetricMirror | None:
+    global _MIRROR
+    with _MIRROR_LOCK:
+        if _MIRROR is None:
+            if not (run_id := os.environ.get("TRAINING_GYM_TRAINING_RUN_ID")):
+                return None
+            from modal_training_gym.common.reporting import register_pre_drain_hook
+
+            mirror = _MIRROR = MetricMirror(run_id)
+            register_pre_drain_hook(lambda: mirror.flush(final=True))
+        return _MIRROR
+
+
 def mirror_log(
     data: Any, *, step: int | None = None, commit: bool | None = None
 ) -> None:
     """Best-effort mirror of one ``wandb.log`` call; never raises."""
-    global _MIRROR
     try:
-        with _MIRROR_LOCK:
-            if _MIRROR is None:
-                if not (run_id := os.environ.get("TRAINING_GYM_TRAINING_RUN_ID")):
-                    return
-                from modal_training_gym.common.reporting import register_pre_drain_hook
+        mirror = _mirror()
+        if mirror is not None and isinstance(data, Mapping):
+            mirror.log(data, step=step, commit=commit)
+    except Exception:
+        pass
 
-                mirror = _MIRROR = MetricMirror(run_id)
-                register_pre_drain_hook(lambda: mirror.flush(final=True))
-        if isinstance(data, Mapping):
-            _MIRROR.log(data, step=step, commit=commit)
+
+def mirror_define_metric(name: Any, step_metric: Any = None) -> None:
+    """Best-effort mirror of one ``wandb.define_metric`` call; never raises."""
+    try:
+        mirror = _mirror()
+        if mirror is not None and isinstance(name, str):
+            mirror.define_metric(name, step_metric=step_metric)
     except Exception:
         pass
 
@@ -229,12 +274,14 @@ def install_wandb_tee() -> None:
 
 
 def patch_wandb_module() -> None:
-    """Tee ``Run.log``, which ``wandb.log`` dispatches to after ``init``."""
+    """Tee ``Run.log`` and ``Run.define_metric``, which the module-level
+    ``wandb.log``/``wandb.define_metric`` dispatch to after ``init``."""
     run_cls = import_module("wandb.sdk.wandb_run").Run
     if "_training_gym_mirror" in vars(run_cls):
         return
     run_cls._training_gym_mirror = True
     original_log = run_cls.log
+    original_define_metric = run_cls.define_metric
 
     def log(
         self: Any, data: Any, step: Any = None, commit: Any = None, *a: Any, **k: Any
@@ -243,7 +290,15 @@ def patch_wandb_module() -> None:
         mirror_log(data, step=step, commit=commit)
         return result
 
+    def define_metric(
+        self: Any, name: Any, step_metric: Any = None, *a: Any, **k: Any
+    ) -> Any:
+        result = original_define_metric(self, name, step_metric, *a, **k)
+        mirror_define_metric(name, step_metric=step_metric)
+        return result
+
     run_cls.log = log
+    run_cls.define_metric = define_metric
 
 
 # ── dashboard: a W&B-shaped module over the dashboard ─────
@@ -289,8 +344,13 @@ class DashboardRun:
     ) -> None:
         mirror_log(data, step=step, commit=commit)
 
+    def define_metric(
+        self, name: Any, step_metric: Any = None, *_a: Any, **_k: Any
+    ) -> None:
+        mirror_define_metric(name, step_metric=step_metric)
+
     def __getattr__(self, name: str) -> Any:
-        # finish, define_metric, save, watch, alert, ...: accepted and ignored.
+        # finish, save, watch, alert, ...: accepted and ignored.
         return lambda *args, **kwargs: None
 
 
@@ -344,7 +404,9 @@ def install_wandb_shim() -> None:
     shim.finish = finish
     shim.save = lambda *args, **kwargs: []
     shim.login = lambda *args, **kwargs: True
-    shim.define_metric = lambda *args, **kwargs: None
+    shim.define_metric = lambda name, step_metric=None, *a, **k: mirror_define_metric(
+        name, step_metric=step_metric
+    )
 
     def missing(name: str) -> Any:
         if name[:1].isupper():

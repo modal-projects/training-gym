@@ -14,7 +14,7 @@ from typing import Any, ClassVar, Self
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.metric_mirror import mirror_log
+from modal_training_gym.common.metric_mirror import mirror_define_metric, mirror_log
 from modal_training_gym.common.metrics import MetricConfig
 
 
@@ -454,7 +454,9 @@ def install_wandb_shim() -> None:
     shim.finish = finish
     shim.save = save
     shim.login = lambda **kwargs: True
-    shim.define_metric = lambda *args, **kwargs: None
+    shim.define_metric = lambda name, step_metric=None, *a, **k: mirror_define_metric(
+        name, step_metric=step_metric
+    )
     shim.__getattr__ = lambda name: getattr(trackio, name)
 
     util: Any = types.ModuleType("wandb.util")

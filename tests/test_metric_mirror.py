@@ -103,6 +103,39 @@ def test_implicit_step_and_commit_follow_wandb_semantics(sent):
     assert len(sent) == 1  # nothing pending, nothing sent
 
 
+def test_define_metric_charts_keys_against_their_step_metric(sent):
+    """Slime logs `rollout/*` next to `rollout/step` with no `step=`; W&B
+    plots them on `rollout/step`, not on the per-call counter."""
+    mirror = MetricMirror("run-1")
+    mirror.define_metric("train/step")
+    mirror.define_metric("train/*", step_metric="train/step")
+    mirror.define_metric("rollout/step")
+    mirror.define_metric("rollout/*", step_metric="rollout/step")
+    mirror.define_metric("perf/*", step_metric="rollout/step")
+    mirror.define_metric("eval/*", step_metric="eval/step")
+    mirror.define_metric("loop", step_metric="loop")  # self-reference: ignored
+    for rollout in range(3):
+        mirror.log({"rollout/reward": 0.1 * rollout, "rollout/step": rollout})
+        mirror.log({"train/loss": 1.0 - rollout, "train/step": 4 * rollout})
+        mirror.log({"perf/time": 2.0, "rollout/step": rollout})
+    mirror.log({"eval/acc": 0.5})  # no step metric in the call: implicit step
+    mirror.log({"loop": 7.0, "free": 1.0})
+    mirror.log({"rollout/reward": 9.0, "rollout/step": -1})  # dropped
+    mirror.flush()
+    assert sent[0]["points"] == [
+        {
+            "step": 0,
+            "metrics": {"rollout/reward": 0.0, "train/loss": 1.0, "perf/time": 2.0},
+        },
+        {"step": 1, "metrics": {"rollout/reward": 0.1, "perf/time": 2.0}},
+        {"step": 2, "metrics": {"rollout/reward": 0.2, "perf/time": 2.0}},
+        {"step": 4, "metrics": {"train/loss": 0.0}},
+        {"step": 8, "metrics": {"train/loss": -1.0}},
+        {"step": 9, "metrics": {"eval/acc": 0.5}},
+        {"step": 10, "metrics": {"loop": 7.0, "free": 1.0}},
+    ]
+
+
 def test_log_schedules_one_timer_per_batch(sent, monkeypatch):
     monkeypatch.setattr(metric_mirror, "FLUSH_INTERVAL_SECONDS", 0.05)
     mirror = MetricMirror("run-1")
@@ -120,10 +153,16 @@ def test_mirror_log_is_best_effort(sent, monkeypatch):
     monkeypatch.delenv("TRAINING_GYM_TRAINING_RUN_ID", raising=False)
     metric_mirror.mirror_log({"a": 1})  # no run: silently ignored
 
+    metric_mirror.mirror_define_metric("a", step_metric="s")  # no run: ignored
+    assert metric_mirror._MIRROR is None
+
     monkeypatch.setenv("TRAINING_GYM_TRAINING_RUN_ID", "run-env")
     hooks = []
     monkeypatch.setattr(reporting, "register_pre_drain_hook", hooks.append)
+    metric_mirror.mirror_define_metric("b", step_metric="s")
+    metric_mirror.mirror_define_metric(object(), step_metric="s")
     metric_mirror.mirror_log({"a": 1}, step=2)
+    metric_mirror.mirror_log({"b": 1, "s": 5}, step=2)
     metric_mirror.mirror_log("not a mapping")
     mirror = metric_mirror._MIRROR
     assert mirror is not None and mirror.training_run_id == "run-env"
@@ -133,7 +172,10 @@ def test_mirror_log_is_best_effort(sent, monkeypatch):
         {
             "training_run_id": "run-env",
             "final": True,
-            "points": [{"step": 2, "metrics": {"a": 1.0}}],
+            "points": [
+                {"step": 2, "metrics": {"a": 1.0}},
+                {"step": 5, "metrics": {"b": 1.0}},
+            ],
         }
     ]
     monkeypatch.setattr(metric_mirror, "_MIRROR", None)
@@ -333,6 +375,10 @@ def test_dashboard_shim_routes_wandb_calls_to_the_mirror(isolated_wandb, sent):
     wandb.log({"train/loss": 0.4}, step=2)
     run.log({"reward": 1.5}, step=2)
     wandb.define_metric("train/loss", summary="min")
+    wandb.define_metric("rollout/*", step_metric="rollout/step")
+    run.define_metric("eval/*", step_metric="eval/step")
+    wandb.log({"rollout/reward": 0.5, "rollout/step": 30})
+    run.log({"eval/acc": 0.7, "eval/step": 40})
     wandb.save("file.txt")
     run.watch(None)
     assert wandb.login() is True
@@ -342,6 +388,8 @@ def test_dashboard_shim_routes_wandb_calls_to_the_mirror(isolated_wandb, sent):
     assert sent[0]["points"] == [
         {"step": 1, "metrics": {"train/loss": 0.9}},
         {"step": 2, "metrics": {"train/loss": 0.4, "reward": 1.5}},
+        {"step": 30, "metrics": {"rollout/reward": 0.5}},
+        {"step": 40, "metrics": {"eval/acc": 0.7}},
     ]
 
 
@@ -356,6 +404,10 @@ def _fake_wandb_package() -> types.ModuleType:
 
         def log(self, data, step=None, commit=None, sync=None):
             self.logged.append((dict(data), step, commit))
+
+        def define_metric(self, name, step_metric=None, **kwargs):
+            self.logged.append(("define", name, step_metric))
+            return name
 
     wandb_run.Run = Run  # type: ignore[attr-defined]
     sdk.wandb_run = wandb_run  # type: ignore[attr-defined]
@@ -374,12 +426,15 @@ def test_tee_patches_run_log_and_keeps_calling_wandb(isolated_wandb, sent):
     run.log({"b": 2}, commit=False)
     run.log({"c": 3})
     run.log({"d": 4, "e": "text"}, step=7)
-    assert len(run.logged) == 4
+    assert run.define_metric("rollout/*", step_metric="rollout/step") == "rollout/*"
+    run.log({"rollout/reward": 0.5, "rollout/step": 30})
+    assert len(run.logged) == 6
     metric_mirror._MIRROR.flush()
     assert sent[0]["points"] == [
         {"step": 0, "metrics": {"a": 1.0}},
         {"step": 1, "metrics": {"b": 2.0, "c": 3.0}},
         {"step": 7, "metrics": {"d": 4.0}},
+        {"step": 30, "metrics": {"rollout/reward": 0.5}},
     ]
 
 
@@ -399,6 +454,14 @@ def test_trackio_shim_mirrors(isolated_wandb, sent, monkeypatch):
     import wandb  # noqa: PLC0415
 
     wandb.log({"x": 1.0}, step=4)
-    assert logged == [({"x": 1.0}, 4)]
+    wandb.define_metric("rollout/*", step_metric="rollout/step")
+    wandb.log({"rollout/reward": 0.5, "rollout/step": 30})
+    assert logged == [
+        ({"x": 1.0}, 4),
+        ({"rollout/reward": 0.5, "rollout/step": 30}, None),
+    ]
     metric_mirror._MIRROR.flush()
-    assert sent[0]["points"] == [{"step": 4, "metrics": {"x": 1.0}}]
+    assert sent[0]["points"] == [
+        {"step": 4, "metrics": {"x": 1.0}},
+        {"step": 30, "metrics": {"rollout/reward": 0.5}},
+    ]
