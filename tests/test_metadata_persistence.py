@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from contextlib import nullcontext
 from unittest.mock import AsyncMock, Mock
 
@@ -292,3 +293,22 @@ def test_terminal_save_failure_preserves_training_error(monkeypatch, fake_volume
         assert caught.value is original
 
     asyncio.run(run())
+
+
+def test_sync_list_reads_files_concurrently(fake_volume, monkeypatch):
+    for i in range(2):
+        metadata.vol_put(
+            MetadataStore.TRAINING_RUNS, f"run-{i}", {"training_run_id": f"run-{i}"}
+        )
+    both_reading = threading.Barrier(2, timeout=5)
+    read_file = fake_volume.read_file
+
+    def read_when_both_reading(path: str):
+        both_reading.wait()
+        return read_file(path)
+
+    monkeypatch.setattr(fake_volume, "read_file", read_when_both_reading)
+
+    records = metadata.vol_list(MetadataStore.TRAINING_RUNS)
+
+    assert sorted(r["training_run_id"] for r in records) == ["run-0", "run-1"]

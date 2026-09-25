@@ -7,6 +7,7 @@ import io
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from functools import partial
 from typing import Any, Literal, TypeVar, cast, overload
@@ -16,6 +17,7 @@ from modal_training_gym._api_reference import exclude_from_api_reference
 T = TypeVar("T")
 
 METADATA_VOLUME_NAME = "training-gym-metadata"
+_READ_CONCURRENCY = 16
 
 
 @exclude_from_api_reference
@@ -172,7 +174,7 @@ async def bounded_gather_with_retries(
 ) -> list[T | BaseException]:
     from modal.exception import Error
 
-    semaphore = asyncio.Semaphore(16)
+    semaphore = asyncio.Semaphore(_READ_CONCURRENCY)
 
     async def _read(reader: Callable[[], Awaitable[T]]) -> T:
         async with semaphore:
@@ -503,28 +505,30 @@ def _read_metadata_records(
 
         return _run()
 
-    records: list[dict[str, Any]] = []
-    for entry in entries:
-        record: Any = None
+    def _read_sync(path: str) -> Any:
         for attempt in range(_LIST_ATTEMPTS):
             try:
-                record = json.loads(b"".join(vol.read_file(entry["path"])))
-                break
+                return json.loads(b"".join(vol.read_file(path)))
             except (FileNotFoundError, NotFoundError):
-                record = None
-                break
+                return None
             except (json.JSONDecodeError, UnicodeDecodeError):
-                record = None
-                break
+                return None
             except Error as exc:
                 if not _is_rate_limit(exc) or attempt == _LIST_ATTEMPTS - 1:
-                    return records, exc
+                    return exc
                 time.sleep(2**attempt)
-        if record is None:
+
+    records: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=_READ_CONCURRENCY) as pool:
+        results = list(pool.map(_read_sync, [entry["path"] for entry in entries]))
+    for result in results:
+        if result is None:
             continue
-        if not isinstance(record, dict):
+        if isinstance(result, BaseException):
+            return records, result
+        if not isinstance(result, dict):
             continue
-        records.append(record)
+        records.append(result)
     return records, None
 
 
