@@ -16,6 +16,7 @@ Local development:
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import modal
 
@@ -120,9 +121,10 @@ def serve():
         path = request.url.path
         if path != "/":
             path = path.rstrip("/") or "/"
-        path = redirects.get(path, path)
-        url = request.url.replace(scheme="https", netloc=CANONICAL_HOST, path=path)
-        return RedirectResponse(url=str(url), status_code=301)
+        target = urlsplit(redirects.get(path, path))
+        query = "&".join(q for q in (target.query, request.url.query) if q)
+        url = urlunsplit(("https", CANONICAL_HOST, target.path, query, target.fragment))
+        return RedirectResponse(url=url, status_code=301)
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

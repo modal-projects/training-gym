@@ -245,11 +245,17 @@ def _remove_renamed_skills(
                 err=True,
             )
             continue
-        if (
-            claude_link_exists
-            and new_name in claude_linked
-            and _symlinked_claude_link_parent(project_root) is None
-        ):
+        if claude_link_exists:
+            if (
+                new_name not in claude_linked
+                or _symlinked_claude_link_parent(project_root) is not None
+            ):
+                click.echo(
+                    f"Kept {old_name} because Claude is not yet linked to "
+                    f"{new_name}; remove {claude_link} and {canonical} manually.",
+                    err=True,
+                )
+                continue
             _remove_path(claude_link)
         if canonical_exists:
             _remove_path(canonical)

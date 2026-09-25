@@ -384,8 +384,9 @@ def test_skills_install_keeps_legacy_claude_link_when_new_link_fails(
     )
 
     assert result.exit_code == 0
-    assert not old_canonical.exists()
+    assert old_canonical.is_dir()
     assert old_link.is_symlink()
+    assert old_link.resolve() == old_canonical
 
 
 def test_skills_install_requires_git_repo_without_project_dir(monkeypatch, tmp_path):
