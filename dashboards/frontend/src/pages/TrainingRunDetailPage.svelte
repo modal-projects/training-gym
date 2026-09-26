@@ -656,6 +656,7 @@
       lossPoints = (payload.series?.["train/loss"] ?? []).map(([x, y]) => ({ x, y }));
       lossStale = payload.stale ?? false;
       lossError = "";
+      return true;
     } catch (err) {
       if (!signal?.aborted) lossError = String(err?.message || err);
     }
@@ -694,15 +695,21 @@
 
     const load = isSftRun ? loadLoss : loadAdvantages;
     const controller = new AbortController();
-    void load(controller.signal);
     let finalLoadDone = false;
+    let inFlight = false;
+    const poll = async (final) => {
+      if (inFlight) return;
+      inFlight = true;
+      const ok = await load(controller.signal);
+      inFlight = false;
+      if (final && (!isSftRun || ok)) finalLoadDone = true;
+    };
+    void poll(false);
     const interval = window.setInterval(() => {
       const status = String(run?.status || "").toLowerCase();
-      if (status && status !== "running" && !(isSftRun && lossStale)) {
-        if (finalLoadDone) return;
-        finalLoadDone = true;
-      }
-      void load(controller.signal);
+      const final = status && status !== "running" && !(isSftRun && lossStale);
+      if (final && finalLoadDone) return;
+      void poll(final);
     }, 5000);
 
     return () => {
