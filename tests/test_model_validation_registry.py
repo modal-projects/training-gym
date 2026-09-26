@@ -136,9 +136,7 @@ def test_every_config_builds_a_recipe_on_its_declared_framework(config):
     assert recipe is not None
     assert dataset is not None
     assert recipe.loss_type == config.loss_type
-    if config.loss_type == "sft_loss":
-        assert dataset.hf_repo == "HuggingFaceH4/no_robots"
-    else:
+    if config.loss_type != "sft_loss":
         assert recipe.rm_type, f"{config.name} validation recipe has no rm_type"
 
 

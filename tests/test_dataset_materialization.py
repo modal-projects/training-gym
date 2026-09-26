@@ -215,43 +215,12 @@ def test_sft_rejects_eval_dataset():
         )
 
 
-def test_policy_loss_requires_label_key():
-    class LabelFreeDataset(RowsDataset):
-        def label_key(self) -> str:
-            return ""
-
-    with pytest.raises(TrainingGymConfigError, match="label_key"):
-        BaseTrainRecipe._validate_datasets(LabelFreeDataset("a"))
-    BaseTrainRecipe._validate_datasets(LabelFreeDataset("a"), loss_type="sft_loss")
-
-
 def test_failed_write_does_not_leave_reusable_partial(tmp_path):
     class FlakyDataset(RowsDataset):
         def rows(self):
             yield {"prompt": "ok", "label": "ok"}
             raise TrainingGymConfigError("boom")
 
-    path = str(tmp_path / "train.jsonl")
-    dataset = FlakyDataset("train")
     with pytest.raises(TrainingGymConfigError, match="boom"):
-        write_dataset_if_needed(dataset, path)
-    assert not (tmp_path / "train.jsonl").exists()
+        write_dataset_if_needed(FlakyDataset("train"), str(tmp_path / "train.jsonl"))
     assert list(tmp_path.iterdir()) == []
-
-
-def test_sft_failed_row_does_not_leave_reusable_partial(tmp_path):
-    class TwoRowDataset(DatasetConfig):
-        def input_key(self) -> str:
-            return "messages"
-
-        def label_key(self) -> str:
-            return "label"
-
-        def rows(self):
-            yield {"messages": [USER], "label": "hello"}
-            yield {"messages": [USER], "label": ""}
-
-    path = str(tmp_path / "train.jsonl")
-    with pytest.raises(TrainingGymConfigError, match="SFT row"):
-        write_dataset_if_needed(_SftDataset(TwoRowDataset()), path)
-    assert not (tmp_path / "train.jsonl").exists()

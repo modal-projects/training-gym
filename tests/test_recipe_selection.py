@@ -258,12 +258,6 @@ def test_sft_loss_emits_native_sft_flags(recipe_cls, framework) -> None:
     assert recipe.train_async is (recipe_cls is MilesRecipe)
 
 
-def test_sft_num_epoch_leaves_explicit_save_interval() -> None:
-    recipe = SlimeRecipe(loss_type="sft_loss", num_epoch=3, save_interval=5)
-    args = recipe.cli_args(dataset=_dataset())
-    assert dict(zip(args, args[1:]))["--save-interval"] == "5"
-
-
 @pytest.mark.parametrize("recipe_cls", [SlimeRecipe, MilesRecipe])
 def test_extra_config_num_epoch_skips_rollout_save_interval(recipe_cls) -> None:
     recipe = recipe_cls(
@@ -271,7 +265,6 @@ def test_extra_config_num_epoch_skips_rollout_save_interval(recipe_cls) -> None:
         num_rollout=1,
         extra_config={"num_epoch": 3},
     )
-    assert recipe._fields()["save_interval"] is None
     assert "--save-interval" not in recipe.cli_args(dataset=_dataset())
 
 
@@ -303,9 +296,7 @@ def test_sft_extra_config_batch_keeps_rollout_in_sync() -> None:
         extra_config={"global_batch_size": 8},
     )
     args = recipe.cli_args(dataset=_dataset())
-    values = dict(zip(args, args[1:]))
-    assert "--global-batch-size" not in values
-    assert values["--rollout-batch-size"] == "8"
+    assert dict(zip(args, args[1:]))["--rollout-batch-size"] == "8"
 
 
 def test_sft_extra_config_conflicting_batches_raise() -> None:

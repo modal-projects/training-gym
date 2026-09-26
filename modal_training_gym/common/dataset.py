@@ -72,7 +72,7 @@ class DatasetConfig(ABC):
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
-        """Materialize training data at ``path`` via an atomic temp-file replace."""
+        """Materialize training data at ``path``."""
         parent = os.path.dirname(path) or "."
         fd, tmp = tempfile.mkstemp(prefix=".dataset-", suffix=".tmp", dir=parent)
         try:

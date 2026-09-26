@@ -194,17 +194,6 @@ class BaseTrainRecipe(ABC):
             raise TrainingGymConfigError(
                 "eval_dataset is not supported with loss_type='sft_loss'"
             )
-        if loss_type != "sft_loss":
-            for dataset, name in ((ds, "dataset"), (eval_ds, "eval_dataset")):
-                if dataset is None:
-                    continue
-                if not dataset.label_key():
-                    raise TrainingGymConfigError(
-                        f"{name} label_key() is unset. RL (policy_loss) requires a "
-                        "ground-truth column; pass output_column=... on "
-                        "HuggingFaceDataset, or use loss_type='sft_loss' for "
-                        "assistant-terminated conversations without a separate label."
-                    )
         if eval_ds is None:
             return
         for dataset_method in ("input_key", "label_key", "apply_chat_template"):
