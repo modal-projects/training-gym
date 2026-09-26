@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from modal_training_gym import cli as cli_module
-from modal_training_gym.cli.skills import (
+from modal_dojo import cli as cli_module
+from modal_dojo.cli import skills as skills_module
+from modal_dojo.cli.errors import CLIError
+from modal_dojo.cli.skills import (
     _bundled_skills,
 )
 
@@ -49,7 +51,7 @@ def test_wheel_contains_bundled_skill(tmp_path):
     wheel = next(tmp_path.glob("*.whl"))
     with zipfile.ZipFile(wheel) as archive:
         for skill_name in _bundled_skills():
-            packaged_prefix = f"modal_training_gym/_skills/{skill_name}/"
+            packaged_prefix = f"modal_dojo/_skills/{skill_name}/"
             packaged_contents = {
                 Path(name.removeprefix(packaged_prefix)): archive.read(name)
                 for name in archive.namelist()
@@ -327,6 +329,64 @@ def test_skills_install_accepts_explicit_non_git_project(tmp_path):
         claude_link = tmp_path / ".claude" / "skills" / skill_name
         assert (destination / "SKILL.md").is_file()
         assert claude_link.resolve() == destination
+
+
+def test_skills_install_removes_renamed_training_gym_overview(monkeypatch, tmp_path):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    old_canonical = tmp_path / ".agents" / "skills" / "training-gym-overview"
+    old_canonical.mkdir(parents=True)
+    (old_canonical / "SKILL.md").write_text("---\nname: training-gym-overview\n---\n")
+    old_link = tmp_path / ".claude" / "skills" / "training-gym-overview"
+    old_link.parent.mkdir(parents=True)
+    old_link.symlink_to(old_canonical, target_is_directory=True)
+
+    runner = CliRunner()
+    without_force = runner.invoke(cli_module.entrypoint_cli, ["skills", "install"])
+
+    assert without_force.exit_code == 0
+    assert "rerun with --force" in without_force.stderr
+    assert old_canonical.is_dir()
+    assert old_link.is_symlink()
+
+    with_force = runner.invoke(
+        cli_module.entrypoint_cli, ["skills", "install", "--force"]
+    )
+
+    assert with_force.exit_code == 0
+    assert "Removed training-gym-overview" in with_force.stdout
+    assert not old_canonical.exists()
+    assert not old_link.is_symlink() and not old_link.exists()
+    assert (
+        tmp_path / ".agents" / "skills" / "modal-dojo-overview" / "SKILL.md"
+    ).is_file()
+
+
+def test_skills_install_keeps_legacy_claude_link_when_new_link_fails(
+    monkeypatch, tmp_path
+):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    old_canonical = tmp_path / ".agents" / "skills" / "training-gym-overview"
+    old_canonical.mkdir(parents=True)
+    (old_canonical / "SKILL.md").write_text("old\n")
+    old_link = tmp_path / ".claude" / "skills" / "training-gym-overview"
+    old_link.parent.mkdir(parents=True)
+    old_link.symlink_to(old_canonical, target_is_directory=True)
+
+    def _fail(*args, **kwargs):
+        raise CLIError("nope", error="skill_install_failed")
+
+    monkeypatch.setattr(skills_module, "_install_claude_link", _fail)
+
+    result = CliRunner().invoke(
+        cli_module.entrypoint_cli, ["skills", "install", "--force"]
+    )
+
+    assert result.exit_code == 0
+    assert old_canonical.is_dir()
+    assert old_link.is_symlink()
+    assert old_link.resolve() == old_canonical
 
 
 def test_skills_install_requires_git_repo_without_project_dir(monkeypatch, tmp_path):

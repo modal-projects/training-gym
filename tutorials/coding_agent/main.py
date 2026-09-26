@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from modal_training_gym import (
+from modal_dojo import (
     DatasetConfig,
     Qwen3_6_27B,
     Qwen3_6_27B_Recipe,
@@ -70,7 +70,7 @@ class AgentTaskDataset(DatasetConfig):
 
 # ## Start training
 #
-# With the [Qwen3_6_27B_Recipe](https://gym.modal.dev/reference/qwen3_6_27b_recipe)
+# With the [Qwen3_6_27B_Recipe](https://dojo.modal.dev/reference/qwen3_6_27b_recipe)
 # recipe class, it's just that simple.
 
 RUN_NAME = f"coding-agent-{uuid4().hex}"

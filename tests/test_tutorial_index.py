@@ -2,7 +2,7 @@ from pathlib import Path
 import inspect
 import sys
 
-import modal_training_gym as gym
+import modal_dojo as gym
 import pytest
 import yaml
 
@@ -96,7 +96,7 @@ def test_homepage_frontmatter_is_order_only(tmp_path: Path) -> None:
     generate_starlight(tmp_path)
     text = (tmp_path / "index.md").read_text()
     assert _frontmatter_lines(text) == ["order: 0"]
-    assert "\n# Training Gym\n" in text
+    assert "\n# Modal Dojo\n" in text
 
 
 def test_authored_pages_use_order_and_h1() -> None:
@@ -140,7 +140,7 @@ def test_collect_guides_orders_by_section_then_order() -> None:
 
 def test_readme_heading_and_intro_skips_badges_and_rewrites_anchors() -> None:
     markdown = (
-        "# Training Gym\n"
+        "# Modal Dojo\n"
         "\n"
         "[![ci](https://img.shields.io/badge/ci-ok)](https://example.com)\n"
         "\n"
@@ -151,9 +151,9 @@ def test_readme_heading_and_intro_skips_badges_and_rewrites_anchors() -> None:
         "## Quickstart\n"
     )
     assert _readme_heading_and_intro(markdown) == (
-        "Training Gym",
+        "Modal Dojo",
         "First paragraph with a "
-        "[Quickstart](https://gym.modal.dev/#quickstart).\n\n"
+        "[Quickstart](https://dojo.modal.dev/#quickstart).\n\n"
         "Second paragraph.",
     )
 
@@ -176,9 +176,9 @@ def test_render_groups_guides_by_section() -> None:
     assert start < tools < migration
     assert text.index("[Model]", start) < text.index("[Dataset]", start) < tools
     assert intro in text
-    assert "https://gym.modal.dev/guides/model)" in text
-    assert "https://gym.modal.dev/guides/dataset)" in text
-    assert "https://gym.modal.dev/guides/wandb-integration)" in text
+    assert "https://dojo.modal.dev/guides/model)" in text
+    assert "https://dojo.modal.dev/guides/dataset)" in text
+    assert "https://dojo.modal.dev/guides/wandb-integration)" in text
     assert "/guides/start/" not in text
     assert "/guides/tools/" not in text
     for line in text.splitlines():

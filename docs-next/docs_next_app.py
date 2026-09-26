@@ -16,6 +16,7 @@ Local development:
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import modal
 
@@ -46,6 +47,9 @@ image = (
 
 app = modal.App("training-gym-docs", image=image)
 
+CANONICAL_HOST = "dojo.modal.dev"
+LEGACY_HOSTS = frozenset({"gym.modal.dev"})
+
 
 def cache_control_value(path: str, content_type: str) -> str | None:
     if path.startswith("/_astro/"):
@@ -61,7 +65,7 @@ def cache_control_value(path: str, content_type: str) -> str | None:
 
 @app.function(min_containers=1)
 @modal.concurrent(max_inputs=100)
-@modal.asgi_app(custom_domains=["gym.modal.dev"])
+@modal.asgi_app(custom_domains=[CANONICAL_HOST, *sorted(LEGACY_HOSTS)])
 def serve():
     from fastapi import FastAPI, Request, Response
     from fastapi.middleware.gzip import GZipMiddleware
@@ -106,6 +110,21 @@ def serve():
         query = request.url.query
         location = f"{target}?{query}" if query else target
         return RedirectResponse(url=location, status_code=redirect_status(path))
+
+    # Registered last so it runs outermost: legacy hosts get a single hop to the
+    # canonical host with the trailing slash and refresh redirects pre-applied.
+    @web.middleware("http")
+    async def legacy_host_redirect(request: Request, call_next):
+        host = request.headers.get("host", "").split(":")[0].lower()
+        if host not in LEGACY_HOSTS:
+            return await call_next(request)
+        path = request.url.path
+        if path != "/":
+            path = path.rstrip("/") or "/"
+        target = urlsplit(redirects.get(path, path))
+        query = "&".join(q for q in (target.query, request.url.query) if q)
+        url = urlunsplit(("https", CANONICAL_HOST, target.path, query, target.fragment))
+        return RedirectResponse(url=url, status_code=301)
 
     web.mount("/", StaticFiles(directory=REMOTE_DIST, html=True), name="static")
 

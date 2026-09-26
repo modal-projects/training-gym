@@ -4,15 +4,15 @@ import inspect
 
 import pytest
 
-from modal_training_gym.common.checkpoint import Checkpoint, CheckpointType
-from modal_training_gym.common.dataset import HuggingFaceDataset
-from modal_training_gym.common.errors import TrainingGymConfigError
-from modal_training_gym.common.models import Qwen3_5_4B
-from modal_training_gym.common.train import TrainConfig
-from modal_training_gym.frameworks.miles.launcher import build_miles_app
-from modal_training_gym.frameworks.slime.launcher import build_slime_app
-from modal_training_gym.train_recipes.miles_recipe import MilesRecipe
-from modal_training_gym.train_recipes.slime_recipe import SlimeRecipe
+from modal_dojo.common.checkpoint import Checkpoint, CheckpointType
+from modal_dojo.common.dataset import HuggingFaceDataset
+from modal_dojo.common.errors import TrainingDojoConfigError
+from modal_dojo.common.models import Qwen3_5_4B
+from modal_dojo.common.train import TrainConfig
+from modal_dojo.frameworks.miles.launcher import build_miles_app
+from modal_dojo.frameworks.slime.launcher import build_slime_app
+from modal_dojo.train_recipes.miles_recipe import MilesRecipe
+from modal_dojo.train_recipes.slime_recipe import SlimeRecipe
 
 _RECIPE_KW = dict(
     gpu_type="H100",
@@ -135,7 +135,7 @@ def test_hf_export_is_not_a_training_resume_checkpoint() -> None:
     config = _config(SlimeRecipe(**_RECIPE_KW), CheckpointType.hf)
 
     with pytest.raises(
-        TrainingGymConfigError,
+        TrainingDojoConfigError,
         match="Hugging Face exports are serving artifacts",
     ):
         config._prepare_recipe()
@@ -154,8 +154,7 @@ def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
     source = inspect.getsource(build_slime_app)
 
     assert (
-        "modal_training_gym.frameworks.slime.modal_helpers.convert_hf_to_torch_dist"
-        in source
+        "modal_dojo.frameworks.slime.modal_helpers.convert_hf_to_torch_dist" in source
     )
     assert (
         'convert_script = f"{SLIME_ROOT}/tools/convert_hf_to_torch_dist.py"'
@@ -174,7 +173,7 @@ def test_slime_conversion_uses_wrapper_with_expected_environment() -> None:
 def test_internal_resume_uses_saved_optimizer_and_restores_recipe(
     recipe_cls, no_save_optim
 ) -> None:
-    from modal_training_gym.common.launcher_helpers import resumed_recipe
+    from modal_dojo.common.launcher_helpers import resumed_recipe
 
     recipe = recipe_cls(
         num_rollout=10,
@@ -204,8 +203,7 @@ def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
     source = inspect.getsource(build_miles_app)
 
     assert (
-        "modal_training_gym.frameworks.miles.modal_helpers.convert_hf_to_torch_dist"
-        in source
+        "modal_dojo.frameworks.miles.modal_helpers.convert_hf_to_torch_dist" in source
     )
     assert (
         'convert_script = f"{MILES_ROOT}/tools/convert_hf_to_torch_dist.py"'
@@ -229,11 +227,11 @@ def test_miles_conversion_uses_wrapper_with_expected_environment() -> None:
 def test_auto_resume_drops_extra_config_start_rollout_id(recipe, tmp_path) -> None:
     import yaml
 
-    from modal_training_gym.common.launcher_utils import (
+    from modal_dojo.common.launcher_utils import (
         prepare_launch_config,
     )
 
-    from modal_training_gym.common.launcher_helpers import resumed_recipe
+    from modal_dojo.common.launcher_helpers import resumed_recipe
 
     recipe.extra_config = {"start_rollout_id": 0, "qkv_format": "bshd"}
     prepare_launch_config(
