@@ -171,6 +171,11 @@ def create_training_volumes(
     return name, mount, volumes
 
 
+def _user_secrets(recipe: Any) -> list[Any]:
+    secrets = (recipe.train_function_kwargs or {}).get("secrets") or []
+    return list(secrets) if isinstance(secrets, (list, tuple)) else [secrets]
+
+
 def training_function_options(
     recipe: Any,
     *,
@@ -179,9 +184,7 @@ def training_function_options(
     experimental_options: dict[str, Any],
 ) -> dict[str, Any]:
     overrides = dict(recipe.train_function_kwargs or {})
-    user_secrets = overrides.pop("secrets", None) or []
-    if not isinstance(user_secrets, (list, tuple)):
-        user_secrets = [user_secrets]
+    overrides.pop("secrets", None)
     if extra := sorted(set(overrides) - {"experimental_options", "ephemeral_disk"}):
         raise TypeError(
             f"Unsupported {framework}.train_function_kwargs keys: {', '.join(extra)}"
@@ -192,7 +195,7 @@ def training_function_options(
         "cpu": recipe.cpu,
         "cloud": recipe.cloud,
         "region": recipe.region,
-        "secrets": [*secrets, *user_secrets],
+        "secrets": [*secrets, *_user_secrets(recipe)],
         "ephemeral_disk": overrides.get("ephemeral_disk"),
         "timeout": 24 * 60 * 60,
         "retries": Retries(max_retries=recipe.max_retries, initial_delay=0.0),
@@ -268,6 +271,7 @@ def report_phase(
 def register_recipe_functions(
     app: Any,
     image: Image,
+    recipe: Any,
     *,
     hf_cache_volume: Volume,
     data_volume: Volume,
@@ -277,7 +281,6 @@ def register_recipe_functions(
     download: Callable[[], None],
     download_timeout: int,
     prepare_dataset: Callable[[], None],
-    dataset_timeout: int,
 ) -> None:
     from modal_training_gym.common import hf_secrets, proxy_auth_secrets
     from modal_training_gym.common.status_reporter import flush as flush_status
@@ -316,8 +319,8 @@ def register_recipe_functions(
     @app.function(
         image=image,
         volumes={str(DATA_PATH): data_volume},
-        timeout=dataset_timeout,
-        secrets=hf_secrets(),
+        timeout=24 * 60 * 60,
+        secrets=[*hf_secrets(), *_user_secrets(recipe)],
         serialized=True,
         name="prepare_dataset",
     )
