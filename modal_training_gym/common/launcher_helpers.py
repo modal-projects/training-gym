@@ -769,6 +769,7 @@ def training_reporting_env(
     return {
         "TRAINING_GYM_APP_NAME": app_name,
         "TRAINING_GYM_TOTAL_STEPS": str(recipe.num_rollout),
+        "TRAINING_GYM_LOSS_TYPE": recipe.loss_type,
         "TRAINING_GYM_RESPONSE_PARSER_PATH": f"{module}.{name}"
         if module and name
         else "",

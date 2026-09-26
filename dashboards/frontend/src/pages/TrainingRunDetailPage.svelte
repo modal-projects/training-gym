@@ -36,7 +36,9 @@
     fetchRunAdvantages,
     fetchRunAdvantageStep,
     fetchRunLogs,
+    fetchRunMetrics,
   } from "../lib/api.js";
+  import { formatMetricValue } from "../lib/metricSeries.js";
   import { groupByRollout, rolloutIndex, rolloutScores } from "../lib/rolloutGrouping.js";
   import { normalizeMetricLinks } from "../lib/metricLinks.js";
   import { PERCENTILE_LINES, percentileRowFields } from "../lib/percentileLines.js";
@@ -195,7 +197,7 @@
   // Active tab: "summary" | "rollouts" | "logs". One-way sync with the URL:
   // init/popstate/runId read URL → activeTab; selectTab writes pushState.
   let activeTab = $state(/** @type {TabId} */ (DEFAULT_TAB));
-  let isSftRun = $derived(run?.config_summary?.loss_type === "sft_loss");
+  let isSftRun = $derived(run?.training_type === "sft");
 
   function selectTab(tab) {
     const next = DETAIL_TABS.has(tab) ? /** @type {TabId} */ (tab) : DEFAULT_TAB;
@@ -307,6 +309,14 @@
   // step's overall stats + quantiles) — drives the advantage fan chart.
   let advantageSteps = $state([]);
   let hasAdvantages = $derived(advantageSteps.length > 0);
+
+  let lossPoints = $state(null);
+  let lossError = $state("");
+  let lossStale = $state(false);
+  let lossStats = $derived.by(() => {
+    const values = (lossPoints ?? []).map((p) => p.y);
+    return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
+  });
 
   const BUCKET_COUNT = 12;
   let activeBucket = $state(null); // histogram bucket index, or null
@@ -638,6 +648,19 @@
     }
   }
 
+  async function loadLoss(signal) {
+    if (!runId) return;
+    try {
+      const payload = await fetchRunMetrics(runId, { signal });
+      if (signal?.aborted) return;
+      lossPoints = (payload.series?.["train/loss"] ?? []).map(([x, y]) => ({ x, y }));
+      lossStale = payload.stale ?? false;
+      lossError = "";
+    } catch (err) {
+      if (!signal?.aborted) lossError = String(err?.message || err);
+    }
+  }
+
   // Reset rollout state when the run changes (separate from the fetch effect
   // so flipping between the summary/rollouts tabs doesn't clear what's loaded).
   $effect(() => {
@@ -657,21 +680,25 @@
     expandedRolloutId = null;
     expandedRollout = null;
     advantageSteps = [];
+    lossPoints = null;
+    lossError = "";
+    lossStale = false;
     closeBucket();
   });
 
-  // Load advantage distributions while the Summary tab is active; poll so new
-  // steps stream in on a running run.
+  // Load advantage distributions (loss for SFT) while the Summary tab is
+  // active; poll so new steps stream in on a running run.
   $effect(() => {
     const id = runId;
-    if (!id || runMissing || isSftRun || activeTab !== "summary") return;
+    if (!id || runMissing || activeTab !== "summary") return;
 
+    const load = isSftRun ? loadLoss : loadAdvantages;
     const controller = new AbortController();
-    void loadAdvantages(controller.signal);
+    void load(controller.signal);
     const interval = window.setInterval(() => {
       const status = String(run?.status || "").toLowerCase();
-      if (status && status !== "running") return;
-      void loadAdvantages(controller.signal);
+      if (status && status !== "running" && !(isSftRun && lossStale)) return;
+      void load(controller.signal);
     }, 5000);
 
     return () => {
@@ -1722,6 +1749,7 @@
                 timeRange={chartRange.entireRun ? null : chartRange}
                 onChangeTimeRange={setChartRange}
                 showOpenRollout={!isSftRun}
+                trainingType={run?.training_type}
                 onOpenRollout={(id) => {
                   selectTab("rollouts");
                   if (expandedRolloutId !== id) void toggleRolloutDetail(id);
@@ -1875,6 +1903,32 @@
               </div>
             {/if}
           {/if}
+          {:else if lossPoints === null && !lossError}
+            <div class="rollout-chart">
+              <ChartSkeleton variant="line" height={140} showTitle />
+            </div>
+          {:else if lossPoints === null}
+            <div class="detail-empty">Failed to load loss: {lossError}</div>
+          {:else if !lossPoints.length}
+            <div class="detail-empty">No loss reported yet.</div>
+          {:else}
+            <div class="rollout-chart">
+              <div class="chart-scroll">
+                <LineChart
+                  title="Loss"
+                  data={lossPoints}
+                  label="loss"
+                  formatX={(row) => `step ${row.x}`}
+                  formatY={formatMetricValue}
+                  ariaLabel="Loss chart"
+                />
+              </div>
+              <div class="flex flex-wrap gap-[16px] mt-[6px] text-[11px] text-(--muted) [font-variant-numeric:tabular-nums]">
+                <span>min {formatMetricValue(lossStats.min)}</span>
+                <span>latest {formatMetricValue(lossStats.latest)}</span>
+                <span>max {formatMetricValue(lossStats.max)}</span>
+              </div>
+            </div>
           {/if}
         </div>
         <aside class="summary-tab-side">

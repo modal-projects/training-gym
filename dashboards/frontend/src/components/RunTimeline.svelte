@@ -4,6 +4,7 @@
   import { brushZoom } from "../lib/brushZoom.js";
   import {
     CATEGORIES,
+    categoryLabelFor,
     APPROXIMATE_LANE_NOTE,
     breakLabelLayout,
     colorFor,
@@ -30,6 +31,7 @@
     runOrigin = null,
     asyncOverride = null,
     showOpenRollout = true,
+    trainingType = null,
     attemptMarkers = [],
     // Wall-clock window `{ start, end }` (epoch seconds) to show; null shows
     // the whole timeline. With `onChangeTimeRange` the window is controlled
@@ -218,7 +220,7 @@
   let laneTip = $state(null);
   let groupedTipChildren = $derived(
     tip?.bar.children
-      ? groupTooltipChildren(tip.bar.children, tip.bar.aggregateStats)
+      ? groupTooltipChildren(tip.bar.children, tip.bar.aggregateStats, trainingType)
       : [],
   );
   let pinned = $state(false);
@@ -296,7 +298,7 @@
   }
 
   function tipTitle(bar) {
-    const name = labelFor(bar.name, bar.rolloutId);
+    const name = labelFor(bar.name, bar.rolloutId, trainingType);
     const title = bar.ordinal ? `${name} ${bar.ordinal}` : name;
     return isApproximateSpan(bar) ? `${title}*` : title;
   }
@@ -453,7 +455,7 @@
               class:idle-swatch={key === "idle"}
               style:background={key === "idle" ? "transparent" : CATEGORIES[key].color}
             ></span>
-            {CATEGORIES[key].label}
+            {categoryLabelFor(key, trainingType)}
           </span>
         {/each}
       </div>
@@ -574,7 +576,7 @@
                           }
                           class:expanded-parent={isExpandedParent(bar)}
                           class:active={pinned && isActive(bar)}
-                          aria-label={`${labelFor(bar.name, bar.rolloutId)} ${fmtSecs(bar.duration)}`}
+                          aria-label={`${labelFor(bar.name, bar.rolloutId, trainingType)} ${fmtSecs(bar.duration)}`}
                           style:left="0"
                           style:width="100%"
                           style:--bar-color={
@@ -621,7 +623,7 @@
                             type="button"
                             class="bar-hit-target"
                             data-bar-key={bar.key}
-                            aria-label={`${labelFor(bar.name, bar.rolloutId)} ${fmtSecs(bar.duration)}`}
+                            aria-label={`${labelFor(bar.name, bar.rolloutId, trainingType)} ${fmtSecs(bar.duration)}`}
                             style:z-index={nestedHitTargets.get(row)?.get(bar.key)?.zIndex}
                             style:--hit-left={nestedHitTargets.get(row)?.get(bar.key)?.left}
                             style:--hit-right={nestedHitTargets.get(row)?.get(bar.key)?.right}
