@@ -13,8 +13,10 @@ from enum import Enum
 from typing import Any, Literal
 import hashlib
 import json
+import os
 import random
 import shutil
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -70,10 +72,21 @@ class DatasetConfig(ABC):
         raise NotImplementedError(f"{type(self).__name__} has no rows()")
 
     def write(self, path: str) -> None:
-        """Materialize training data at ``path``."""
-        with open(path, "w") as f:
-            for row in self.rows():
-                f.write(json.dumps(row) + "\n")
+        """Materialize training data at ``path`` via an atomic temp-file replace."""
+        parent = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".dataset-", suffix=".tmp", dir=parent)
+        try:
+            with os.fdopen(fd, "w") as f:
+                for row in self.rows():
+                    f.write(json.dumps(row) + "\n")
+            os.replace(tmp, path)
+            tmp = ""
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     def _expected_columns(self) -> set[str]:
         cols: set[str] = set()
@@ -85,8 +98,6 @@ class DatasetConfig(ABC):
 
     def validate_written(self, path: str) -> None:
         """Validate the materialized file format and required columns."""
-        import os
-
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"{type(self).__name__}.write() did not produce {path!r}. "

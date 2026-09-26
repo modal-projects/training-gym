@@ -377,8 +377,13 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
         return False
     os.makedirs(os.path.dirname(path), exist_ok=True)
     print(f"Writing dataset ({path})...")
-    dataset.write(path)
-    dataset.validate_written(path)
+    try:
+        dataset.write(path)
+        dataset.validate_written(path)
+    except Exception:
+        if os.path.exists(path):
+            os.unlink(path)
+        raise
     return True
 
 

@@ -667,12 +667,14 @@ class SlimeRecipe(BaseTrainRecipe):
         *,
         dataset_path: str | None = None,
         eval_dataset_path: str | None = None,
+        loss_type: str = "policy_loss",
     ) -> dict[str, Any]:
         fields = super()._dataset_to_fields(
             ds,
             eval_ds,
             dataset_path=dataset_path,
             eval_dataset_path=eval_dataset_path,
+            loss_type=loss_type,
         )
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
@@ -827,11 +829,13 @@ class SlimeRecipe(BaseTrainRecipe):
                     eval_dataset,
                     dataset_path=dataset_path,
                     eval_dataset_path=eval_dataset_path,
+                    loss_type=self.loss_type,
                 )
             )
         _apply_loss_type_fields(
             fields,
             sft_rollout_function="slime.rollout.sft_rollout.generate_rollout",
+            escape_hatch=self._escape_hatch_values(),
         )
         if model is not None:
             self.validate_model_parallelism(model)

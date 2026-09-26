@@ -54,7 +54,10 @@ _SFT_CLI_OVERRIDES: dict[str, Any] = {
 
 
 def _apply_loss_type_fields(
-    fields: dict[str, Any], *, sft_rollout_function: str
+    fields: dict[str, Any],
+    *,
+    sft_rollout_function: str,
+    escape_hatch: dict[str, Any] | None = None,
 ) -> None:
     if fields["num_epoch"] is not None:
         fields["num_rollout"] = None
@@ -63,12 +66,31 @@ def _apply_loss_type_fields(
         fields["loss_mask_type"] = None
         return
     fields.update(_SFT_CLI_OVERRIDES)
-    global_batch_size = fields.get("global_batch_size")
-    rollout_batch_size = fields.get("rollout_batch_size")
-    if global_batch_size is not None:
-        fields["rollout_batch_size"] = global_batch_size
-    elif rollout_batch_size is not None:
-        fields["global_batch_size"] = rollout_batch_size
+    hatch = escape_hatch or {}
+    hatch_global = hatch["global_batch_size"] if "global_batch_size" in hatch else None
+    hatch_rollout = (
+        hatch["rollout_batch_size"] if "rollout_batch_size" in hatch else None
+    )
+    if (
+        hatch_global is not None
+        and hatch_rollout is not None
+        and hatch_global != hatch_rollout
+    ):
+        raise TrainingGymConfigError(
+            "extra_config global_batch_size and rollout_batch_size must match "
+            f"for loss_type='sft_loss' (got {hatch_global!r} and {hatch_rollout!r})"
+        )
+    if hatch_global is not None:
+        batch_size = hatch_global
+    elif hatch_rollout is not None:
+        batch_size = hatch_rollout
+    elif fields.get("global_batch_size") is not None:
+        batch_size = fields["global_batch_size"]
+    else:
+        batch_size = fields.get("rollout_batch_size")
+    if batch_size is not None:
+        fields["global_batch_size"] = batch_size
+        fields["rollout_batch_size"] = batch_size
     fields["rollout_function"] = sft_rollout_function
     if fields.get("loss_mask_type") == "qwen":
         fields["loss_mask_type"] = None
@@ -172,6 +194,17 @@ class BaseTrainRecipe(ABC):
             raise TrainingGymConfigError(
                 "eval_dataset is not supported with loss_type='sft_loss'"
             )
+        if loss_type != "sft_loss":
+            for dataset, name in ((ds, "dataset"), (eval_ds, "eval_dataset")):
+                if dataset is None:
+                    continue
+                if not dataset.label_key():
+                    raise TrainingGymConfigError(
+                        f"{name} label_key() is unset. RL (policy_loss) requires a "
+                        "ground-truth column; pass output_column=... on "
+                        "HuggingFaceDataset, or use loss_type='sft_loss' for "
+                        "assistant-terminated conversations without a separate label."
+                    )
         if eval_ds is None:
             return
         for dataset_method in ("input_key", "label_key", "apply_chat_template"):
@@ -191,8 +224,9 @@ class BaseTrainRecipe(ABC):
         *,
         dataset_path: str | None = None,
         eval_dataset_path: str | None = None,
+        loss_type: str = "policy_loss",
     ) -> dict[str, Any]:
-        cls._validate_datasets(ds, eval_ds)
+        cls._validate_datasets(ds, eval_ds, loss_type=loss_type)
         return {
             "prompt_data": dataset_path,
             "eval_prompt_data": (

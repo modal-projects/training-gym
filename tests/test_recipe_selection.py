@@ -276,3 +276,24 @@ def test_miles_qwen35_sft_raises() -> None:
     recipe = Qwen3_5_4B_Miles_Recipe(loss_type="sft_loss")
     with pytest.raises(TrainingGymConfigError, match="qwen3_5"):
         recipe.cli_args(dataset=_dataset())
+
+
+def test_sft_extra_config_batch_keeps_rollout_in_sync() -> None:
+    recipe = SlimeRecipe(
+        loss_type="sft_loss",
+        global_batch_size=4,
+        extra_config={"global_batch_size": 8},
+    )
+    args = recipe.cli_args(dataset=_dataset())
+    values = dict(zip(args, args[1:]))
+    assert "--global-batch-size" not in values
+    assert values["--rollout-batch-size"] == "8"
+
+
+def test_sft_extra_config_conflicting_batches_raise() -> None:
+    recipe = SlimeRecipe(
+        loss_type="sft_loss",
+        extra_config={"global_batch_size": 8, "rollout_batch_size": 4},
+    )
+    with pytest.raises(TrainingGymConfigError, match="must match"):
+        recipe.cli_args(dataset=_dataset())
