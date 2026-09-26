@@ -179,7 +179,7 @@
       </div>
       <div class="kv">
         <span class="kv-key">Training type</span>
-        <span class="kv-value">{run.training_type.toUpperCase()}</span>
+        <span class="kv-value">{(run.training_type ?? "rl").toUpperCase()}</span>
       </div>
       {#if modalAppUrl}
         <div class="kv">

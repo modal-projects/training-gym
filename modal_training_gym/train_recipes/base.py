@@ -64,6 +64,10 @@ def _apply_loss_type_fields(
     escape_hatch: dict[str, Any] | None = None,
 ) -> None:
     hatch = escape_hatch or {}
+    if "loss_type" in hatch:
+        raise TrainingGymConfigError(
+            "extra_config cannot set loss_type; set the loss_type field instead"
+        )
     if hatch.get("num_epoch", fields["num_epoch"]) is not None:
         fields["num_rollout"] = None
     if fields["loss_type"] == "policy_loss":

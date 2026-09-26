@@ -309,3 +309,10 @@ def test_sft_extra_config_conflicting_batches_raise() -> None:
     )
     with pytest.raises(TrainingGymConfigError, match="must match"):
         recipe.cli_args(dataset=_dataset())
+
+
+@pytest.mark.parametrize("recipe_cls", [SlimeRecipe, MilesRecipe])
+def test_extra_config_loss_type_raises(recipe_cls) -> None:
+    recipe = recipe_cls(extra_config={"loss_type": "sft_loss"})
+    with pytest.raises(TrainingGymConfigError, match="set the loss_type field"):
+        recipe.cli_args(dataset=_dataset())

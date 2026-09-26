@@ -411,6 +411,7 @@ class MilesRecipe(BaseTrainRecipe):
             ``PYTHONPATH`` and NCCL settings.
         async_mode:
             Run Miles' ``train_async.py`` so rollout generation and training overlap.
+            Ignored with ``loss_type="sft_loss"``, which always runs ``train_async.py``.
         metrics:
             Metric tracker settings; expands to Miles' W&B-compatible flags.
             Defaults to the dashboard-only tracker; ``None`` disables metric

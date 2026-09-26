@@ -384,7 +384,7 @@
                   </td>
                   <td class="row-open-cell">
                     <a href={trainingRunDetailPath(run.run_id)} class="cell-open-button" onclick={(event) => selectRun(run.run_id, event)}>
-                      {run.training_type.toUpperCase()}
+                      {(run.training_type ?? "rl").toUpperCase()}
                     </a>
                   </td>
                   <td class="group-cell row-open-cell" title={groupTags?.group_id || run.group_id || ""}>

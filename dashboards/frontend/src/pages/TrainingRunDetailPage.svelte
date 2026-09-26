@@ -695,9 +695,13 @@
     const load = isSftRun ? loadLoss : loadAdvantages;
     const controller = new AbortController();
     void load(controller.signal);
+    let finalLoadDone = false;
     const interval = window.setInterval(() => {
       const status = String(run?.status || "").toLowerCase();
-      if (status && status !== "running" && !(isSftRun && lossStale)) return;
+      if (status && status !== "running" && !(isSftRun && lossStale)) {
+        if (finalLoadDone) return;
+        finalLoadDone = true;
+      }
       void load(controller.signal);
     }, 5000);
 

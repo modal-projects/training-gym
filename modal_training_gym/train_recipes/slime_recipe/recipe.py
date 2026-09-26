@@ -359,7 +359,8 @@ class SlimeRecipe(BaseTrainRecipe):
             ``PYTHONPATH`` and NCCL settings.
         async_mode:
             Overlap rollout generation and training with slime's one-step off-policy
-            ``train_async.py``.
+            ``train_async.py``. Ignored with ``loss_type="sft_loss"``, which always
+            runs ``train.py``.
         metrics:
             Metric tracker settings; expands to slime's W&B-compatible flags.
             Defaults to the dashboard-only tracker; ``None`` disables metric
