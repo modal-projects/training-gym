@@ -31,6 +31,7 @@ from modal_training_gym.train_recipes.base import (
     JSON_CONFIG_FIELDS as JSON_CONFIG_FIELDS,
 )
 from modal_training_gym.train_recipes.base import (
+    SAVE_AT_EPOCH_ENDS_ONLY,
     BaseTrainRecipe,
     _apply_loss_type_fields,
 )
@@ -819,6 +820,8 @@ class SlimeRecipe(BaseTrainRecipe):
                 fields["save_interval"] = self._escape_hatch_values().get(
                     "num_rollout", self.num_rollout
                 )
+            else:
+                fields["save_interval"] = SAVE_AT_EPOCH_ENDS_ONLY
         if (
             self.colocate
             and self.loss_type != "sft_loss"

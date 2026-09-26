@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from abc import ABC
 from collections.abc import Callable
@@ -38,6 +39,9 @@ def _safe_data_key(cache_key: str) -> str:
 # Recipe fields whose dict values are emitted as JSON CLI arguments.
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
 
+# since save_interval must be specified for SFT runs
+SAVE_AT_EPOCH_ENDS_ONLY = sys.maxsize
+
 _SFT_CLI_OVERRIDES: dict[str, Any] = {
     "colocate": False,
     "rollout_num_gpus": None,
@@ -59,14 +63,14 @@ def _apply_loss_type_fields(
     sft_rollout_function: str,
     escape_hatch: dict[str, Any] | None = None,
 ) -> None:
-    if fields["num_epoch"] is not None:
+    hatch = escape_hatch or {}
+    if hatch.get("num_epoch", fields["num_epoch"]) is not None:
         fields["num_rollout"] = None
     if fields["loss_type"] == "policy_loss":
         fields["loss_type"] = None
         fields["loss_mask_type"] = None
         return
     fields.update(_SFT_CLI_OVERRIDES)
-    hatch = escape_hatch or {}
     hatch_global = hatch["global_batch_size"] if "global_batch_size" in hatch else None
     hatch_rollout = (
         hatch["rollout_batch_size"] if "rollout_batch_size" in hatch else None

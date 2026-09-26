@@ -16,6 +16,7 @@ from modal_training_gym.common.launcher_utils import (
 from modal_training_gym.common.models import Qwen3_4B
 from modal_training_gym.common.models.validation import Framework, _ValidationConfig
 from modal_training_gym.common.train import TrainConfig
+from modal_training_gym.train_recipes.base import SAVE_AT_EPOCH_ENDS_ONLY
 from modal_training_gym.train_recipes.gpu_allocation import (
     validate_megatron_actor_parallelism,
 )
@@ -253,7 +254,7 @@ def test_sft_loss_emits_native_sft_flags(recipe_cls, framework) -> None:
         args
     )
     assert not {"--apply-chat-template", "--num-rollout", "--colocate"} & set(args)
-    assert "--save-interval" not in args
+    assert values["--save-interval"] == str(SAVE_AT_EPOCH_ENDS_ONLY)
     assert recipe.gpu_allocation.rollout_gpus == 0
     assert recipe.train_async is (recipe_cls is MilesRecipe)
 
@@ -265,7 +266,9 @@ def test_extra_config_num_epoch_skips_rollout_save_interval(recipe_cls) -> None:
         num_rollout=1,
         extra_config={"num_epoch": 3},
     )
-    assert "--save-interval" not in recipe.cli_args(dataset=_dataset())
+    args = recipe.cli_args(dataset=_dataset())
+    assert args[args.index("--save-interval") + 1] == str(SAVE_AT_EPOCH_ENDS_ONLY)
+    assert "--num-rollout" not in args
 
 
 def test_sft_qwen35_emits_loss_mask_type_qwen3_5() -> None:
