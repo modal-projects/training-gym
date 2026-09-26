@@ -9,6 +9,8 @@ the shared logic stays in one place.
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import shlex
 from enum import Enum
 from math import lcm
@@ -72,6 +74,73 @@ def resolve_checkpoint_ref(
     from huggingface_hub import snapshot_download
 
     return snapshot_download(ref_str, local_files_only=local_files_only)
+
+
+def prewarm_remote_code(hf_path: str, environment: dict[str, str]) -> None:
+    """Import a checkpoint's remote code once per container before the ranks do.
+
+    On first use transformers copies a model's ``trust_remote_code`` files into
+    ``HF_MODULES_CACHE`` and imports them. Eight torchrun ranks (or eight Ray
+    actors) doing that at once read each other's half-written copies and die
+    with ``module ... has no attribute 'KimiK3Config'``. Warming the cache from
+    one process makes every later import find identical files and skip the
+    copy. ``environment`` is consulted for ``HF_MODULES_CACHE`` so the warm-up
+    lands where the ranks will look; a recipe should point it at container-
+    local disk, since the default sits on the shared HF cache Volume.
+
+    Best effort: a model without remote code, or one whose tokenizer cannot be
+    built here, must not fail the run.
+    """
+    cache = environment.get("HF_MODULES_CACHE")
+    if cache:
+        os.environ["HF_MODULES_CACHE"] = cache
+        os.makedirs(cache, exist_ok=True)
+        dynamic = sys.modules.get("transformers.dynamic_module_utils")
+        if dynamic is not None:  # imported before the variable was set
+            dynamic.HF_MODULES_CACHE = cache
+    try:
+        from transformers import AutoConfig, AutoTokenizer
+
+        AutoConfig.from_pretrained(hf_path, trust_remote_code=True)
+        AutoTokenizer.from_pretrained(hf_path, trust_remote_code=True)
+    except Exception as exc:  # noqa: BLE001 - warm-up only
+        print(f"[prewarm_remote_code] skipped for {hf_path}: {exc!r}", flush=True)
+        return
+    print(f"[prewarm_remote_code] warmed {hf_path}", flush=True)
+
+
+def materialize_remote_code(snapshot_dir: str) -> list[str]:
+    """Replace symlinked ``*.py`` files in an HF cache snapshot with real copies.
+
+    ``snapshot_download`` links every file in ``snapshots/<rev>/`` to
+    ``blobs/<sha>``. transformers 5.12 hashes a local model's remote code with
+    ``Path(module_file).resolve()``, which follows that link into ``blobs/``,
+    and then looks for the module's relative imports (``from .encoding_k3
+    import ...``) next to the blob: ``blobs/encoding_k3.py`` does not exist, so
+    ``AutoTokenizer.from_pretrained(<snapshot path>)`` dies for any checkpoint
+    whose tokenizer or model code spans several files (Kimi-K3, for one). A real
+    file resolves to itself, so its siblings are found in the snapshot.
+
+    The launcher's head node calls this once per launch, right after the model
+    download and before the cache Volume commits, so one writer touches the
+    shared cache (a cached snapshot from before this fix is rewritten too);
+    every later reader sees plain files. Returns the paths it rewrote.
+    """
+    rewritten = []
+    for name in sorted(os.listdir(snapshot_dir)):
+        path = os.path.join(snapshot_dir, name)
+        if not name.endswith(".py") or not os.path.islink(path):
+            continue
+        target = os.path.realpath(path)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        shutil.copyfile(target, tmp)
+        os.replace(tmp, path)
+        rewritten.append(path)
+    if rewritten:
+        print(
+            f"[materialize_remote_code] {snapshot_dir}: {', '.join(os.path.basename(p) for p in rewritten)}"
+        )
+    return rewritten
 
 
 def _append_common_arch_args(extra_args: list[str], arch: Any) -> None:
