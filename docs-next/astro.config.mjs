@@ -272,7 +272,6 @@ export default defineConfig({
       },
       customCss: ['./src/styles/custom.css'],
       components: {
-        Banner: './src/components/Banner.astro',
         Header: './src/components/Header.astro',
         MarkdownContent: './src/components/MarkdownContent.astro',
         Search: './src/components/Search.astro',

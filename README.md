@@ -1,6 +1,6 @@
 # Modal Dojo
 
-> **Note:** The Training Gym has been renamed to Modal Dojo. Please update the upstream library name accordingly (`modal-training-gym` → `modal-dojo`, `import modal_training_gym` → `import modal_dojo`, and the `training-gym` CLI → `modal-dojo`). The docs now live at [dojo.modal.dev](https://dojo.modal.dev), and the dashboard app is now named `dojo-dashboard` — re-run `modal-dojo setup` and use the new dashboard URL it prints.
+> **Note:** The Training Gym has been renamed to Modal Dojo. See the [migration doc](https://dojo.modal.dev/guides/dojo-rename) for more information.
 
 Modal Dojo is an open-source Python SDK for RL post-training on [Modal](https://modal.com).
 
