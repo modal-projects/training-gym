@@ -253,8 +253,15 @@ def test_sft_loss_emits_native_sft_flags(recipe_cls, framework) -> None:
         args
     )
     assert not {"--apply-chat-template", "--num-rollout", "--colocate"} & set(args)
+    assert "--save-interval" not in args
     assert recipe.gpu_allocation.rollout_gpus == 0
     assert recipe.train_async is (recipe_cls is MilesRecipe)
+
+
+def test_sft_num_epoch_leaves_explicit_save_interval() -> None:
+    recipe = SlimeRecipe(loss_type="sft_loss", num_epoch=3, save_interval=5)
+    args = recipe.cli_args(dataset=_dataset())
+    assert dict(zip(args, args[1:]))["--save-interval"] == "5"
 
 
 def test_sft_qwen35_emits_loss_mask_type_qwen3_5() -> None:

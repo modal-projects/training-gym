@@ -840,9 +840,10 @@ class MilesRecipe(BaseTrainRecipe):
     ) -> dict[str, Any]:
         fields = self._field_values()
         if fields["save_interval"] is None and fields["save"] is not None:
-            fields["save_interval"] = self._escape_hatch_values().get(
-                "num_rollout", self.num_rollout
-            )
+            if fields["num_epoch"] is None:
+                fields["save_interval"] = self._escape_hatch_values().get(
+                    "num_rollout", self.num_rollout
+                )
         if model is not None:
             self.validate_model_parallelism(model)
             for k, v in self._model_to_fields(model).items():
