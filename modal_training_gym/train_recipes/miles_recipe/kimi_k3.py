@@ -59,8 +59,13 @@ class Kimi_K3_LoRA_Recipe(MilesRecipe):
             # conversion ranks racing to write it read each other's partial
             # files. Container-local, and warmed once per node by the launcher.
             "HF_MODULES_CACHE": "/tmp/hf_modules",
-            # Multi-node B300 on Modal has no MNNVL fabric.
+            # Multi-node B300 on Modal has no MNNVL fabric, and the TP16
+            # engines span two nodes: with NVLS left on, their pynccl
+            # communicator dies in ncclCommInitRank with "invalid usage" (the
+            # Inkling two-node engines needed the same switch).
             "NCCL_MNNVL_ENABLE": "0",
+            "NCCL_NVLS_ENABLE": "0",
+            "NCCL_RAS_ENABLE": "0",
             "NCCL_TIMEOUT": "3600",
             # The release packs its routed experts as MXFP4 compressed-tensors
             # and ships no bf16 export; the converter dequantizes them as
