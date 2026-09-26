@@ -4,7 +4,7 @@ import json
 import warnings
 
 from huggingface_hub import hf_hub_download
-from huggingface_hub.errors import EntryNotFoundError, HFValidationError
+from huggingface_hub.errors import EntryNotFoundError, HFValidationError, HfHubHTTPError
 from huggingface_hub.utils import validate_repo_id
 
 from modal_training_gym.common.models.base import ModelArchitecture, ModelConfig
@@ -19,7 +19,12 @@ def _arch_from_hf(model_name: str) -> ModelArchitecture | None:
         validate_repo_id(model_name)
         with open(hf_hub_download(repo_id=model_name, filename="config.json")) as f:
             cfg = json.load(f)
-    except (HFValidationError, OSError, EntryNotFoundError):
+    except (
+        HFValidationError,
+        HfHubHTTPError,
+        EntryNotFoundError,
+        json.JSONDecodeError,
+    ):
         return None
     if isinstance(cfg.get("text_config"), dict):
         cfg = {**cfg, **cfg["text_config"]}
@@ -88,7 +93,8 @@ def _peak_gib(
     else:
         freq = eval(arch.moe_layer_freq, {"__builtins__": {}})
         if isinstance(freq, int):
-            moe_n = arch.num_layers if freq else 0
+            # Megatron: layer i is MoE iff i % freq == 0.
+            moe_n = len(range(0, arch.num_layers, freq)) if freq else 0
         else:
             moe_n = sum(1 for x in freq if x)
     untie = 2 if arch.untie_embeddings_and_output_weights else 1
@@ -176,8 +182,10 @@ def maybe_warn_gpu_oom(recipe: BaseTrainRecipe, model: ModelConfig) -> None:
     ):
         return
     gpu_gib = gpu_memory_gib(recipe.gpu_type)
+    if gpu_gib is None:
+        return
     arch = model.architecture or _arch_from_hf(model.model_name)
-    if gpu_gib is None or arch is None:
+    if arch is None:
         return
     peak, raised = _peak_gib(
         arch, recipe._field_values() | recipe._escape_hatch_values(), gpu_gib
