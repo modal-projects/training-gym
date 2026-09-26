@@ -313,10 +313,6 @@
   let lossPoints = $state(null);
   let lossError = $state("");
   let lossStale = $state(false);
-  let lossStats = $derived.by(() => {
-    const values = (lossPoints ?? []).map((p) => p.y);
-    return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
-  });
 
   const BUCKET_COUNT = 12;
   let activeBucket = $state(null); // histogram bucket index, or null
@@ -653,7 +649,7 @@
     try {
       const payload = await fetchRunMetrics(runId, { signal });
       if (signal?.aborted) return;
-      lossPoints = (payload.series?.["train/loss"] ?? []).map(([x, y]) => ({ x, y }));
+      lossPoints = (payload.series?.["train/loss"] ?? []).map(([x, y, t]) => ({ x, y, t }));
       lossStale = payload.stale ?? false;
       lossError = "";
       return true;
@@ -1445,6 +1441,19 @@
   }
 
   let chartStats = $derived(_seriesStats((r) => Number(r.mean) || 0));
+
+  let lossInRange = $derived(
+    (lossPoints ?? []).filter(
+      (p) =>
+        chartRange.entireRun ||
+        p.t == null ||
+        (p.t >= chartRange.start && p.t <= chartRange.end),
+    ),
+  );
+  let lossStats = $derived.by(() => {
+    const values = lossInRange.map((p) => p.y);
+    return { min: Math.min(...values), max: Math.max(...values), latest: values[values.length - 1] };
+  });
   let rewardChartData = $derived(
     rolloutSummaries.map((r) => ({
       x: Number(r.rollout_id) || 0,
@@ -1927,7 +1936,7 @@
               <div class="chart-scroll">
                 <LineChart
                   title="Loss"
-                  data={lossPoints}
+                  data={lossInRange}
                   label="loss"
                   formatX={(row) => `step ${row.x}`}
                   formatY={formatMetricValue}
