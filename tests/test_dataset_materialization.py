@@ -1,8 +1,9 @@
 import json
+import pickle
 
 import pytest
 
-from modal_training_gym.common.dataset import DatasetConfig, HarborDataset
+from modal_training_gym.common.dataset import DatasetConfig, HarborDataset, _SftDataset
 from modal_training_gym.common.errors import TrainingGymConfigError
 from modal_training_gym.common.launcher_helpers import (
     write_dataset_if_needed,
@@ -166,3 +167,91 @@ def test_harbor_always_download_disables_materialization_reuse():
     assert BaseTrainRecipe._resolve_data_paths(
         dataset
     ) != BaseTrainRecipe._resolve_data_paths(dataset)
+
+
+class PairDataset(DatasetConfig):
+    def __init__(self, row: dict) -> None:
+        self.row = row
+
+    def input_key(self) -> str:
+        return "messages"
+
+    def label_key(self) -> str:
+        return "label"
+
+    def rows(self):
+        yield self.row
+
+
+USER = {"role": "user", "content": "hi"}
+ASSISTANT = {"role": "assistant", "content": "hello"}
+
+
+@pytest.mark.parametrize(
+    ("messages", "expected"),
+    [
+        ("hi", [USER, ASSISTANT]),
+        ([USER], [USER, ASSISTANT]),
+        ([ASSISTANT], [ASSISTANT]),
+    ],
+)
+def test_sft_dataset_formats_rows(messages, expected):
+    dataset = pickle.loads(
+        pickle.dumps(_SftDataset(PairDataset({"messages": messages, "label": "hello"})))
+    )
+    assert [row["messages"] for row in dataset.rows()] == [expected]
+
+
+@pytest.mark.parametrize("row", [{"messages": "hi", "label": ""}, {"label": "hello"}])
+def test_sft_dataset_rejects_incomplete_rows(row):
+    with pytest.raises(TrainingGymConfigError, match="SFT row"):
+        list(_SftDataset(PairDataset(row)).rows())
+
+
+def test_sft_rejects_eval_dataset():
+    with pytest.raises(TrainingGymConfigError, match="eval_dataset"):
+        BaseTrainRecipe._validate_datasets(
+            RowsDataset("a"), RowsDataset("b"), loss_type="sft_loss"
+        )
+
+
+def test_failed_write_does_not_leave_reusable_partial(tmp_path):
+    class FlakyDataset(RowsDataset):
+        def rows(self):
+            yield {"prompt": "ok", "label": "ok"}
+            raise TrainingGymConfigError("boom")
+
+    with pytest.raises(TrainingGymConfigError, match="boom"):
+        write_dataset_if_needed(FlakyDataset("train"), str(tmp_path / "train.jsonl"))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_invalid_content_is_not_replaced_into_place(tmp_path):
+    class BadColumnsDataset(RowsDataset):
+        def write(self, dest: str) -> None:
+            self.write_count += 1
+            with open(dest, "w") as f:
+                f.write(json.dumps({"wrong": "cols"}) + "\n")
+
+    path = str(tmp_path / "train.jsonl")
+    with pytest.raises(TrainingGymConfigError, match="missing required column"):
+        write_dataset_if_needed(BadColumnsDataset("train"), path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_failed_write_cleanup_preserves_committed_destination(tmp_path):
+    path = str(tmp_path / "train.jsonl")
+
+    class RaceDataset(RowsDataset):
+        def write(self, dest: str) -> None:
+            self.write_count += 1
+            # Peer finished while this writer was still on its temp path.
+            RowsDataset("peer", "peer").write(path)
+            raise TrainingGymConfigError("boom")
+
+    with pytest.raises(TrainingGymConfigError, match="boom"):
+        write_dataset_if_needed(RaceDataset("train"), path)
+    assert json.loads((tmp_path / "train.jsonl").read_text()) == {
+        "prompt": "peer",
+        "label": "peer",
+    }

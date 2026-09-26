@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from abc import ABC
 from collections.abc import Callable
@@ -37,6 +38,74 @@ def _safe_data_key(cache_key: str) -> str:
 
 # Recipe fields whose dict values are emitted as JSON CLI arguments.
 JSON_CONFIG_FIELDS = ("train_env_vars", "apply_chat_template_kwargs", "multimodal_keys")
+
+# since save_interval must be specified for SFT runs
+SAVE_AT_EPOCH_ENDS_ONLY = sys.maxsize
+
+_SFT_CLI_OVERRIDES: dict[str, Any] = {
+    "colocate": False,
+    "rollout_num_gpus": None,
+    "calculate_per_token_loss": True,
+    "disable_compute_advantages_and_returns": True,
+    "debug_train_only": True,
+    "n_samples_per_prompt": 1,
+    "use_fault_tolerance": False,
+    "use_kl_loss": False,
+    "kl_coef": 0.0,
+    "entropy_coef": 0.0,
+    "apply_chat_template": False,
+}
+
+
+def _apply_loss_type_fields(
+    fields: dict[str, Any],
+    *,
+    sft_rollout_function: str,
+    escape_hatch: dict[str, Any] | None = None,
+) -> None:
+    hatch = escape_hatch or {}
+    if "loss_type" in hatch:
+        raise TrainingGymConfigError(
+            "extra_config cannot set loss_type; set the loss_type field instead"
+        )
+    if hatch.get("num_epoch", fields["num_epoch"]) is not None:
+        fields["num_rollout"] = None
+    if fields["loss_type"] == "policy_loss":
+        fields["loss_type"] = None
+        fields["loss_mask_type"] = None
+        return
+    fields.update(_SFT_CLI_OVERRIDES)
+    hatch_global = hatch["global_batch_size"] if "global_batch_size" in hatch else None
+    hatch_rollout = (
+        hatch["rollout_batch_size"] if "rollout_batch_size" in hatch else None
+    )
+    if (
+        hatch_global is not None
+        and hatch_rollout is not None
+        and hatch_global != hatch_rollout
+    ):
+        raise TrainingGymConfigError(
+            "extra_config global_batch_size and rollout_batch_size must match "
+            f"for loss_type='sft_loss' (got {hatch_global!r} and {hatch_rollout!r})"
+        )
+    if hatch_global is not None:
+        batch_size = hatch_global
+    elif hatch_rollout is not None:
+        batch_size = hatch_rollout
+    elif fields.get("global_batch_size") is not None:
+        batch_size = fields["global_batch_size"]
+    else:
+        batch_size = fields.get("rollout_batch_size")
+    if batch_size is not None:
+        fields["global_batch_size"] = batch_size
+        fields["rollout_batch_size"] = batch_size
+    fields["rollout_function"] = sft_rollout_function
+    if fields.get("loss_mask_type") == "qwen":
+        fields["loss_mask_type"] = None
+    if fields["advantage_estimator"] == "ppo":
+        fields["advantage_estimator"] = "grpo"
+    if "num_steps_per_rollout" in fields:
+        fields["num_steps_per_rollout"] = 1
 
 
 class BaseTrainRecipe(ABC):
@@ -126,7 +195,13 @@ class BaseTrainRecipe(ABC):
     def _validate_datasets(
         ds: "DatasetConfig",
         eval_ds: "DatasetConfig | None" = None,
+        *,
+        loss_type: str = "policy_loss",
     ) -> None:
+        if loss_type == "sft_loss" and eval_ds is not None:
+            raise TrainingGymConfigError(
+                "eval_dataset is not supported with loss_type='sft_loss'"
+            )
         if eval_ds is None:
             return
         for dataset_method in ("input_key", "label_key", "apply_chat_template"):
@@ -146,8 +221,9 @@ class BaseTrainRecipe(ABC):
         *,
         dataset_path: str | None = None,
         eval_dataset_path: str | None = None,
+        loss_type: str = "policy_loss",
     ) -> dict[str, Any]:
-        cls._validate_datasets(ds, eval_ds)
+        cls._validate_datasets(ds, eval_ds, loss_type=loss_type)
         return {
             "prompt_data": dataset_path,
             "eval_prompt_data": (

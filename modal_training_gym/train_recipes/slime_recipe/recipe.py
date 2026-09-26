@@ -31,7 +31,9 @@ from modal_training_gym.train_recipes.base import (
     JSON_CONFIG_FIELDS as JSON_CONFIG_FIELDS,
 )
 from modal_training_gym.train_recipes.base import (
+    SAVE_AT_EPOCH_ENDS_ONLY,
     BaseTrainRecipe,
+    _apply_loss_type_fields,
 )
 from modal_training_gym.train_recipes.gpu_allocation import (
     resolve_gpu_allocation,
@@ -212,6 +214,15 @@ class SlimeRecipe(BaseTrainRecipe):
             Entropy bonus coefficient.
         calculate_per_token_loss:
             Average the loss over tokens instead of over samples.
+        loss_type:
+            ``"policy_loss"`` for RL or ``"sft_loss"`` for supervised
+            fine-tuning, which overrides conflicting RL settings.
+        loss_mask_type:
+            Chat-template loss mask for SFT. Slime choices are ``qwen``,
+            ``qwen3``, ``qwen3_5``, and ``distill_qwen`` (upstream default
+            ``qwen``). Emitted only under ``sft_loss`` when not the default.
+        num_epoch:
+            Passes over the dataset. Replaces ``num_rollout`` when set.
 
         over_sampling_batch_size:
             Extra DAPO prompts sampled to replace filtered groups.
@@ -348,7 +359,8 @@ class SlimeRecipe(BaseTrainRecipe):
             ``PYTHONPATH`` and NCCL settings.
         async_mode:
             Overlap rollout generation and training with slime's one-step off-policy
-            ``train_async.py``.
+            ``train_async.py``. Ignored with ``loss_type="sft_loss"``, which always
+            runs ``train.py``.
         metrics:
             Metric tracker settings; expands to slime's W&B-compatible flags.
             Defaults to the dashboard-only tracker; ``None`` disables metric
@@ -474,6 +486,8 @@ class SlimeRecipe(BaseTrainRecipe):
     kl_coef: float = 0.0
     entropy_coef: float = 0.0
     calculate_per_token_loss: bool = False
+    loss_type: Literal["policy_loss", "sft_loss"] = "policy_loss"
+    loss_mask_type: Literal["qwen", "qwen3", "qwen3_5", "distill_qwen"] = "qwen"
 
     # ── Dynamic sampling (DAPO) ────────────────────────────────────────────
     over_sampling_batch_size: int | None = None
@@ -482,6 +496,7 @@ class SlimeRecipe(BaseTrainRecipe):
 
     # ── Training ────────────────────────────────────────────────────────────
     global_batch_size: int = 4
+    num_epoch: int | None = None
     num_steps_per_rollout: int | None = None
     lr: float = 1e-6
     lr_decay_style: str = "constant"
@@ -654,12 +669,14 @@ class SlimeRecipe(BaseTrainRecipe):
         *,
         dataset_path: str | None = None,
         eval_dataset_path: str | None = None,
+        loss_type: str = "policy_loss",
     ) -> dict[str, Any]:
         fields = super()._dataset_to_fields(
             ds,
             eval_ds,
             dataset_path=dataset_path,
             eval_dataset_path=eval_dataset_path,
+            loss_type=loss_type,
         )
         if getattr(ds, "multimodal_keys", None):
             fields["multimodal_keys"] = ds.multimodal_keys
@@ -682,6 +699,8 @@ class SlimeRecipe(BaseTrainRecipe):
         cls,
         ds: "DatasetConfig",
         eval_ds: "DatasetConfig | None" = None,
+        *,
+        loss_type: str = "policy_loss",
     ) -> None:
         """Local preflight for the most common dataset misconfigurations.
 
@@ -689,7 +708,7 @@ class SlimeRecipe(BaseTrainRecipe):
         actor's ``__init__``; if those are unset or collide, the failure only
         surfaces after image build + Ray bringup. Catch it here instead.
         """
-        super()._validate_datasets(ds, eval_ds)
+        super()._validate_datasets(ds, eval_ds, loss_type=loss_type)
         for dataset in (ds, eval_ds):
             if dataset is None:
                 continue
@@ -795,11 +814,18 @@ class SlimeRecipe(BaseTrainRecipe):
     ) -> dict[str, Any]:
         fields = self._field_values()
         if fields["save_interval"] is None and fields["save"] is not None:
-            fields["save_interval"] = self._escape_hatch_values().get(
-                "num_rollout", self.num_rollout
+            effective_num_epoch = self._escape_hatch_values().get(
+                "num_epoch", fields["num_epoch"]
             )
+            if effective_num_epoch is None:
+                fields["save_interval"] = self._escape_hatch_values().get(
+                    "num_rollout", self.num_rollout
+                )
+            else:
+                fields["save_interval"] = SAVE_AT_EPOCH_ENDS_ONLY
         if (
             self.colocate
+            and self.loss_type != "sft_loss"
             and fields["sglang_cuda_graph_backend_prefill"] is None
             and "sglang_cuda_graph_backend_prefill" not in self._escape_hatch_keys()
         ):
@@ -811,8 +837,14 @@ class SlimeRecipe(BaseTrainRecipe):
                     eval_dataset,
                     dataset_path=dataset_path,
                     eval_dataset_path=eval_dataset_path,
+                    loss_type=self.loss_type,
                 )
             )
+        _apply_loss_type_fields(
+            fields,
+            sft_rollout_function="slime.rollout.sft_rollout.generate_rollout",
+            escape_hatch=self._escape_hatch_values(),
+        )
         if model is not None:
             self.validate_model_parallelism(model)
             if not self.slime_model_script:
@@ -835,6 +867,10 @@ class SlimeRecipe(BaseTrainRecipe):
         return out
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    @property
+    def train_async(self) -> bool:
+        return self.async_mode and self.loss_type != "sft_loss"
 
     @classmethod
     def get_base_recipe(cls, model_config: ModelConfig) -> "SlimeRecipe":

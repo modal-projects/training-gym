@@ -375,10 +375,22 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
     if os.path.exists(path):
         dataset.validate_written(path)
         return False
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
     print(f"Writing dataset ({path})...")
-    dataset.write(path)
-    dataset.validate_written(path)
+    # Unique sibling of ``path`` so a failed writer never unlinks a peer's
+    # committed materialization at the shared cache_key destination.
+    stem, suffix = os.path.splitext(os.path.basename(path))
+    tmp = os.path.join(parent, f"{stem}.{_secrets.token_hex(8)}.tmp{suffix}")
+    try:
+        dataset.write(tmp)
+        dataset.validate_written(tmp)
+        os.replace(tmp, path)
+        tmp = ""
+    except Exception:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     return True
 
 
@@ -674,7 +686,8 @@ def resumed_recipe(recipe: Any, save_root: str, checkpoint: dict[str, Any] | Non
         if checkpoint is not None:
             iteration = checkpoint.get("resume_from_iteration")
             num_rollout = recipe.num_rollout
-            if iteration is not None:
+            num_epoch = recipe._escape_hatch_values().get("num_epoch", recipe.num_epoch)
+            if iteration is not None and num_epoch is None:
                 if iteration + 1 > num_rollout:
                     raise RuntimeError(
                         f"Resume would start at rollout {iteration + 1}, "
@@ -763,6 +776,7 @@ def training_reporting_env(
     return {
         "TRAINING_GYM_APP_NAME": app_name,
         "TRAINING_GYM_TOTAL_STEPS": str(recipe.num_rollout),
+        "TRAINING_GYM_LOSS_TYPE": recipe.loss_type,
         "TRAINING_GYM_RESPONSE_PARSER_PATH": f"{module}.{name}"
         if module and name
         else "",
