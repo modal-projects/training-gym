@@ -46,7 +46,10 @@ model = Qwen3_5_4B()
 
 def deploy_base_model():
     base_deployment = Endpoint.launch(
-        model, unauthenticated=True, recreate_if_existing=True
+        model,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="rl-basics-baseline",
     )
     base_deployment.wait_until_ready()
     print(f"base model deployed to {base_deployment.url}")
@@ -250,7 +253,11 @@ def train(config):
 
 def deploy_trained_model(checkpoint):
     trained_deployment = Endpoint.launch(
-        model, checkpoint, unauthenticated=True, recreate_if_existing=True
+        model,
+        checkpoint,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="rl-basics-trained",
     )
     trained_deployment.wait_until_ready()
     print(f"checkpoint deployed to {trained_deployment.url}")
@@ -314,7 +321,11 @@ def continue_training(checkpoint):
 
 def deploy_continued_model(new_checkpoint):
     new_deployment = Endpoint.launch(
-        model, new_checkpoint, unauthenticated=True, recreate_if_existing=True
+        model,
+        new_checkpoint,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="rl-basics-continued",
     )
     new_deployment.wait_until_ready()
     print(f"new checkpoint deployed to {new_deployment.url}")
