@@ -18,6 +18,14 @@
 # [Modal Sandbox](https://modal.com/docs/guide/sandboxes) and
 # [Qwen3.6-27B](https://huggingface.co/Qwen/Qwen3.6-27B) compares each against the
 # reference image pool.
+#
+# ![Reward curve](https://modal-cdn.com/cdnbot/flower-reward1maaxmni_1df0871b.webp)
+#
+# <center>
+# <video controls autoplay muted loop>
+# <source src="https://modal-cdn.com/example-paint_flowers.mp4" type="video/mp4">
+# </video>
+# </center>
 
 import asyncio
 import base64
