@@ -264,6 +264,17 @@ def test_sft_num_epoch_leaves_explicit_save_interval() -> None:
     assert dict(zip(args, args[1:]))["--save-interval"] == "5"
 
 
+@pytest.mark.parametrize("recipe_cls", [SlimeRecipe, MilesRecipe])
+def test_extra_config_num_epoch_skips_rollout_save_interval(recipe_cls) -> None:
+    recipe = recipe_cls(
+        loss_type="sft_loss",
+        num_rollout=1,
+        extra_config={"num_epoch": 3},
+    )
+    assert recipe._fields()["save_interval"] is None
+    assert "--save-interval" not in recipe.cli_args(dataset=_dataset())
+
+
 def test_sft_qwen35_emits_loss_mask_type_qwen3_5() -> None:
     assert "--loss-mask-type" not in Qwen3_5_0_8B_Recipe().cli_args(dataset=_dataset())
     sft_args = Qwen3_5_0_8B_Recipe(loss_type="sft_loss").cli_args(dataset=_dataset())

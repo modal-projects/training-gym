@@ -840,7 +840,10 @@ class MilesRecipe(BaseTrainRecipe):
     ) -> dict[str, Any]:
         fields = self._field_values()
         if fields["save_interval"] is None and fields["save"] is not None:
-            if fields["num_epoch"] is None:
+            effective_num_epoch = self._escape_hatch_values().get(
+                "num_epoch", fields["num_epoch"]
+            )
+            if effective_num_epoch is None:
                 fields["save_interval"] = self._escape_hatch_values().get(
                     "num_rollout", self.num_rollout
                 )
