@@ -226,6 +226,19 @@ def test_failed_write_does_not_leave_reusable_partial(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_invalid_content_is_not_replaced_into_place(tmp_path):
+    class BadColumnsDataset(RowsDataset):
+        def write(self, dest: str) -> None:
+            self.write_count += 1
+            with open(dest, "w") as f:
+                f.write(json.dumps({"wrong": "cols"}) + "\n")
+
+    path = str(tmp_path / "train.jsonl")
+    with pytest.raises(TrainingGymConfigError, match="missing required column"):
+        write_dataset_if_needed(BadColumnsDataset("train"), path)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_failed_write_cleanup_preserves_committed_destination(tmp_path):
     path = str(tmp_path / "train.jsonl")
 

@@ -380,7 +380,8 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
     print(f"Writing dataset ({path})...")
     # Unique sibling of ``path`` so a failed writer never unlinks a peer's
     # committed materialization at the shared cache_key destination.
-    tmp = os.path.join(parent, f".dataset-{_secrets.token_hex(8)}.tmp")
+    stem, suffix = os.path.splitext(os.path.basename(path))
+    tmp = os.path.join(parent, f"{stem}.{_secrets.token_hex(8)}.tmp{suffix}")
     try:
         dataset.write(tmp)
         dataset.validate_written(tmp)
