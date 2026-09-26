@@ -375,14 +375,20 @@ def write_dataset_if_needed(dataset: Any, path: str) -> bool:
     if os.path.exists(path):
         dataset.validate_written(path)
         return False
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
     print(f"Writing dataset ({path})...")
+    # Unique sibling of ``path`` so a failed writer never unlinks a peer's
+    # committed materialization at the shared cache_key destination.
+    tmp = os.path.join(parent, f".dataset-{_secrets.token_hex(8)}.tmp")
     try:
-        dataset.write(path)
-        dataset.validate_written(path)
+        dataset.write(tmp)
+        dataset.validate_written(tmp)
+        os.replace(tmp, path)
+        tmp = ""
     except Exception:
-        if os.path.exists(path):
-            os.unlink(path)
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
         raise
     return True
 

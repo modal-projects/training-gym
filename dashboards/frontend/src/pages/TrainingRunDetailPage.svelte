@@ -1359,11 +1359,15 @@
   });
 
   let rolloutKnots = $derived(rolloutTimeKnots(rolloutSummaries));
+  let lossTimestamps = $derived(
+    (lossPoints ?? []).map((p) => p.t).filter((t) => Number.isFinite(t) && t > 0),
+  );
   let chartRunStart = $derived.by(() => {
     const candidates = [
       toEpochSeconds(run?.started_at || run?.created_at),
       rolloutKnots[0]?.t,
       timelineRunOrigin,
+      lossTimestamps.length ? Math.min(...lossTimestamps) : null,
     ].filter((t) => Number.isFinite(t) && t > 0);
     return candidates.length ? Math.min(...candidates) : clockNow;
   });
@@ -1373,7 +1377,8 @@
     if (isRunning) return clockNow;
     const ended = toEpochSeconds(run?.ended_at || run?.completed_at) ?? 0;
     const last = rolloutKnots[rolloutKnots.length - 1]?.t ?? 0;
-    const stopped = Math.max(ended, last);
+    const lastLoss = lossTimestamps.length ? Math.max(...lossTimestamps) : 0;
+    const stopped = Math.max(ended, last, lastLoss);
     return stopped > chartRunStart ? stopped : clockNow;
   });
   let chartRange = $derived(
@@ -1718,7 +1723,7 @@
               <pre class="[border:1px_solid_color-mix(in_srgb,var(--red,#f87171)_45%,transparent)] rounded-[8px] bg-[color-mix(in_srgb,var(--red,#f87171)_12%,transparent)] text-(--red,#f87171) [font-family:var(--font-mono)] text-[12px] leading-[17px] m-0 max-h-[320px] overflow-auto p-[12px_14px] whitespace-pre-wrap [word-break:break-word]">{run.error_message}</pre>
             </div>
           {/if}
-          {#if showTimingSection || (!isSftRun && rolloutSummaries.length)}
+          {#if showTimingSection || (isSftRun ? lossPoints?.length : rolloutSummaries.length)}
             <div class="chart-range-bar">
               <div class="chart-range-dropdown">
                 <MetricsRangeDropdown
