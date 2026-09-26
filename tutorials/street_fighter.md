@@ -22,13 +22,13 @@ We create our environment by defining a custom generate function.
 Here, there are two fighters in a match which sample button sequences
 from the current policy to feed into the
 [Gymnasium](https://gymnasium.farama.org/)-style environment
-concurrently. In this self-play setup, we simply give the winner a
-reward of 1 and the loser -1, with 0 for draws. This implies that in
-ideal play, we expect the sum of all rewards to be 0.
+concurrently.
+
+For the reward, each move choice is scored based on its net damage (i.e., dealt minus taken) from that point to the end of the round and discounted using a[TD-lambda](https://en.wikipedia.org/wiki/Temporal_difference_learning) approximation. So in ideal play, we actually expect the sum of all rewards to be 0.
 
 ```python
 MODEL = Qwen3_VL_8B()
-REWARDS = {"P1": (1.0, -1.0), "P2": (-1.0, 1.0), "draw": (0.0, 0.0)}
+GAMMA = 0.9
 
 _fights: dict[tuple[int, int], asyncio.Task] = {}
 
@@ -51,11 +51,11 @@ async def sf3_generate(args, sample, sampling_params):
 
 
 async def _play_fight(args, sample, sampling_params):
-    characters = random.Random(sample.group_index).sample(ROSTER, 2)
+    characters = random.sample(ROSTER, 2)
     identities = [{"character": c, "superArt": SUPER_ART} for c in characters]
     env = await asyncio.to_thread(
-        create_sf3_environment,
-        SF3EnvironmentConfig(
+        create_environment,
+        EnvironmentConfig(
             characters=tuple(characters),
             outfits=(OUTFIT, OUTFIT),
             super_arts=(SUPER_ART, SUPER_ART),
@@ -67,6 +67,7 @@ async def _play_fight(args, sample, sampling_params):
         encoder = FrameEncoder()
         recent = [deque(maxlen=RECENT_MOVE_LIMIT), deque(maxlen=RECENT_MOVE_LIMIT)]
         moves = [[], []]
+        damage, rounds, round_index = [], [], 0
         while True:
             fighters = [
                 player_state(observation, identities[seat], f"P{seat + 1}")
@@ -100,22 +101,33 @@ async def _play_fight(args, sample, sampling_params):
                 )
                 recent[seat].append(move_name)
                 buttons.append(move_buttons)
+            turn_damage = 0.0
             for p1_button, p2_button in zip_longest(*buttons, fillvalue=0):
-                observation, _, terminated, _, info = await asyncio.to_thread(
+                observation, step_damage, terminated, _, info = await asyncio.to_thread(
                     env.step, {"agent_0": p1_button, "agent_1": p2_button}
                 )
+                turn_damage += step_damage
                 if terminated or info["round_done"]:
                     break
+            damage.append(turn_damage)
+            rounds.append(round_index)
             if info["round_done"]:
+                round_index += 1
                 for seat_recent in recent:
                     seat_recent.clear()
             if terminated:
                 break
     finally:
         await asyncio.to_thread(env.close)
-    for seat_moves, reward in zip(moves, REWARDS[info["winner"]]):
-        for move in seat_moves:
-            move.reward = reward
+    returns, G = [0.0] * len(damage), 0.0
+    for t in reversed(range(len(damage))):
+        if t + 1 < len(damage) and rounds[t + 1] != rounds[t]:
+            G = 0.0
+        G = damage[t] + GAMMA * G
+        returns[t] = G / HEALTH_MAX
+    for seat_moves, sign in zip(moves, (1, -1)):
+        for move, G in zip(seat_moves, returns):
+            move.reward = sign * G
     return moves
 ```
 
@@ -128,11 +140,14 @@ curves will not be that useful: instead, you'll want to watch the `Metrics` tab 
 policy collapse and `train/ppo_kl` for update size) in addition to running
 [offline evals](https://github.com/modal-projects/sf3/tree/main/src/eval) (e.g., win rate against the base model).
 
-```python
-NUM_ROLLOUTS = 10
+Each rollout runs 16 matches with two players each. Since rollout generation is slow, we set `global_batch_size` to a quarter of the rollout and take four optimizer steps per rollout instead of one.
 
-ROLLOUT_BATCH_SIZE = 4
+```python
+NUM_ROLLOUTS = 20
+
+ROLLOUT_BATCH_SIZE = 16
 N_SAMPLES_PER_PROMPT = 2
+GLOBAL_BATCH_SIZE = ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT // 4
 
 model = Qwen3_VL_8B()
 recipe = Qwen3_VL_8B_Recipe(
@@ -144,14 +159,14 @@ recipe = Qwen3_VL_8B_Recipe(
         add_python_source=True,
     ),
     num_rollout=NUM_ROLLOUTS,
+    save_interval=5,
     rollout_batch_size=ROLLOUT_BATCH_SIZE,
     n_samples_per_prompt=N_SAMPLES_PER_PROMPT,
-    global_batch_size=ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT,
+    global_batch_size=GLOBAL_BATCH_SIZE,
     rollout_max_response_len=MAX_TOKENS,
     extra_config={
         **Qwen3_VL_8B_Recipe().extra_config,
         "micro_batch_size": 8,
-        "rewards_normalization": False,
         "custom_megatron_init_path": "src.train.rollout.megatron_init",
     },
 )
