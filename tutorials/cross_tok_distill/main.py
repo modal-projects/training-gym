@@ -60,7 +60,10 @@ student_model = Qwen3_6_35B()
 
 def deploy_base_models():
     base_student_deployment = Endpoint.launch(
-        student_model, unauthenticated=True, recreate_if_existing=True
+        student_model,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="cross-tok-distill-baseline",
     )
 
     teacher_model = HFModelConfiguration(model_name="deepseek-ai/DeepSeek-V4-Flash")
@@ -93,7 +96,7 @@ def deploy_base_models():
             },
             startup_timeout=TEACHER_READY_TIMEOUT,
         ),
-        app_name="dsv4-teacher-model",
+        app_name="cross-tok-distill-teacher",
         served_model_name="deepseek-v4-flash",
     )
 
@@ -996,7 +999,11 @@ def train(config):
 
 def deploy_trained_model(checkpoint):
     trained_student_deployment = Endpoint.launch(
-        student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
+        student_model,
+        checkpoint,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="cross-tok-distill-trained",
     )
     trained_student_deployment.wait_until_ready(timeout=STUDENT_READY_TIMEOUT)
     print(f"checkpoint deployed to {trained_student_deployment.url}")

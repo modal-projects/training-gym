@@ -47,6 +47,7 @@ Repo: https://github.com/modal-projects/training-gym
 - [Training multi-turn coding agents](https://gym.modal.dev/tutorials/coding_agent)
 - [Efficient inference using on-policy distillation](https://gym.modal.dev/tutorials/on_policy_distillation)
 - [On-policy distillation across model families](https://gym.modal.dev/tutorials/cross_tok_distill)
+- [Use fewer tokens without lobotomizing your model](https://gym.modal.dev/tutorials/fewer_tokens)
 - [Long chain-of-thought reasoning for large-scale RL](https://gym.modal.dev/tutorials/dapo)
 - [Speech transcription that's better, faster, and cheaper](https://gym.modal.dev/tutorials/audio_asr)
 - [Massively-parallel hyperparameter sweeps](https://gym.modal.dev/tutorials/param_sweep)

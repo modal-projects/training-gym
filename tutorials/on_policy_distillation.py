@@ -70,12 +70,15 @@ teacher_model = Qwen3_5_9B()
 
 def deploy_models():
     base_student_deployment = Endpoint.launch(
-        student_model, unauthenticated=True, recreate_if_existing=True
+        student_model,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="on-policy-distillation-baseline",
     )
 
     teacher_deployment = CustomDeployment.launch(
         teacher_model,
-        app_name="qwen3.5-9b-teacher",
+        app_name="on-policy-distillation-teacher",
         unauthenticated=True,
     )
 
@@ -351,7 +354,11 @@ def train(config):
 
 def deploy_trained_model(checkpoint):
     trained_student_deployment = Endpoint.launch(
-        student_model, checkpoint, unauthenticated=True, recreate_if_existing=True
+        student_model,
+        checkpoint,
+        unauthenticated=True,
+        recreate_if_existing=True,
+        endpoint_name="on-policy-distillation-trained",
     )
     trained_student_deployment.wait_until_ready()
     print(f"checkpoint deployed to {trained_student_deployment.url}")
