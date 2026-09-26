@@ -24,6 +24,9 @@ from modal_training_gym.common.framework import (
     mount_tools_dir,
 )
 from modal_training_gym.common.launcher_utils import (
+    is_local_checkpoint_ref,
+    materialize_remote_code,
+    prewarm_remote_code,
     timing_debug_env,
 )
 from modal_training_gym.common.metrics import (
@@ -520,8 +523,16 @@ def build_miles_app(
     app = App(app_name, tags=tags)
     gpu_spec = f"{miles.gpu_type}:{miles.gpu_allocation.gpus_per_node}"
 
+    def materialize_model_remote_code() -> None:
+        # transformers 5 cannot load multi-file remote code (Kimi-K3's
+        # tokenizer) through the cache's symlinks; rewrite them while this
+        # container is the only writer, before its Volume commit.
+        if model and model.model_name and not is_local_checkpoint_ref(model.model_name):
+            materialize_remote_code(resolve_checkpoint_ref(model.model_name))
+
     def download_inputs() -> None:
         model.download()
+        materialize_model_remote_code()
         miles.download_model()
         miles.post_process_model()
 
@@ -534,7 +545,7 @@ def build_miles_app(
         checkpoints_mount_path=checkpoints_mount_path,
         download_phase=MilesStatus.DOWNLOAD_MODEL.value,
         download=download_inputs,
-        download_timeout=4 * 60 * 60,
+        download_timeout=miles.download_timeout_seconds or 4 * 60 * 60,
         prepare_dataset=lambda: write_datasets(
             dataset, eval_dataset, dataset_path, eval_dataset_path
         ),
@@ -648,8 +659,11 @@ def build_miles_app(
         image=image,
         gpu=convert_gpu,
         volumes=all_volumes,
-        timeout=4 * 60 * 60,
+        timeout=miles.convert_timeout_seconds or 4 * 60 * 60,
         secrets=proxy_auth_secrets() or None,
+        # The torch_dist save stages every rank's shard through host RAM, so
+        # the converter needs the recipe's memory request as much as training.
+        memory=miles.memory,
         ephemeral_disk=miles.convert_ephemeral_disk_mb,
         experimental_options={"efa_enabled": True} if convert_multi_node else {},
         serialized=True,
@@ -728,6 +742,7 @@ def build_miles_app(
             env["CONVERT_KEEP_PP1"] = "1"
         if num_nodes > 1:
             env["SKIP_RELEASE_RENAME"] = "1"
+        prewarm_remote_code(hf_path, env)
 
         print(
             f"Conversion layout: nodes={num_nodes}, nproc_per_node={nproc_per_node}, "
@@ -858,6 +873,7 @@ def build_miles_app(
                     model.prepare_runtime_cache()
 
             miles.download_model()
+            materialize_model_remote_code()
             await set_status(MilesStatus.CONVERT_MODEL)
             miles.post_process_model()
             await hf_cache_volume.commit.aio()
@@ -899,6 +915,14 @@ def build_miles_app(
                 if time.time() > deadline:
                     raise RuntimeError("Timed out waiting for head preparation marker")
                 await asyncio.sleep(5)
+
+        if model and model.model_name:
+            # Every node: the actors and engines it hosts import the model's
+            # remote code concurrently once Ray is up.
+            prewarm_remote_code(
+                resolve_checkpoint_ref(model.model_path or model.model_name),
+                miles.environment,
+            )
 
         cluster.start_ray()
 

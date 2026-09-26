@@ -77,6 +77,8 @@ _MILES_SKIP = {
     "conversion_expert_model_parallel_size",
     "conversion_expert_tensor_parallel_size",
     "convert_ephemeral_disk_mb",
+    "download_timeout_seconds",
+    "convert_timeout_seconds",
     "capture_trace",
     "trace_sample_limit",
 }
@@ -471,6 +473,12 @@ class MilesRecipe(BaseTrainRecipe):
             Expert tensor-parallel size used only during conversion.
         convert_ephemeral_disk_mb:
             Ephemeral disk in MiB for the conversion job.
+        download_timeout_seconds:
+            Modal timeout for the model/dataset download step; ``None`` keeps
+            the launcher's 4-hour default. Multi-terabyte releases need more.
+        convert_timeout_seconds:
+            Modal timeout for the HF→torch_dist conversion step; ``None`` keeps
+            the launcher's 4-hour default.
     """
 
     # ── App identity ─────────────────────────────────────────────────────────
@@ -631,6 +639,8 @@ class MilesRecipe(BaseTrainRecipe):
     conversion_expert_model_parallel_size: int | None = None
     conversion_expert_tensor_parallel_size: int | None = None
     convert_ephemeral_disk_mb: int | None = None
+    download_timeout_seconds: int | None = None
+    convert_timeout_seconds: int | None = None
 
     # ── Eval ────────────────────────────────────────────────────────────────
     eval_interval: int | None = None
@@ -872,6 +882,9 @@ class MilesRecipe(BaseTrainRecipe):
             Inkling_Small_LoRA_Recipe,
             Inkling_Small_Recipe,
         )
+        from modal_training_gym.train_recipes.miles_recipe.kimi_k3 import (
+            Kimi_K3_LoRA_Recipe,
+        )
         from modal_training_gym.train_recipes.miles_recipe.moonlight_16b_a3b import (
             Moonlight_16B_A3B_Recipe,
         )
@@ -887,6 +900,8 @@ class MilesRecipe(BaseTrainRecipe):
             return DeepSeek_V4_1_Flash_Recipe()
         if model_config.model_name == "google/gemma-4-26B-A4B-it":
             return Gemma4_26B_A4B_Recipe()
+        if model_config.model_name == "moonshotai/Kimi-K3":
+            return Kimi_K3_LoRA_Recipe()
         if isinstance(model_config, Inkling_Small_LoRA):
             return Inkling_Small_LoRA_Recipe()
         if model_config.model_name == "thinkingmachines/Inkling-Small":
